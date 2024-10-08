@@ -12,7 +12,7 @@ DOWNLOAD_ASSET_CANISTER="${DOWNLOAD_ASSET_CANISTER:-true}"
 BUILD_WASMS="${BUILD_WASMS:-true}"
 TEST_THREADS="${TEST_THREADS:-2}"
 OSTYPE="$(uname -s)" || OSTYPE="$OSTYPE"
-OSTYPE="${OSTYPE,,}"
+OSTYPE=$(echo "$OSTYPE" | tr '[:upper:]' '[:lower:]')
 RUNNER_OS="${RUNNER_OS:-}"
 
 if [[ "$OSTYPE" == "linux"* || "$RUNNER_OS" == "Linux" ]]; then

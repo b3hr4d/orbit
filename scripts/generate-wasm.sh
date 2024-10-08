@@ -13,7 +13,7 @@ if [ -n "$FEATURES" ]; then
 fi
 PACKAGE="${CANISTER_NAME}"
 OSTYPE=$(uname -s) || OSTYPE=$OSTYPE
-OSTYPE="${OSTYPE,,}"
+OSTYPE=$(echo "$OSTYPE" | tr '[:upper:]' '[:lower:]')
 RUNNER_OS="${RUNNER_OS:-}"
 
 if [ -z "${CARGO_HOME:-}" ]; then
