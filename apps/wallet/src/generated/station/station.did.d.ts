@@ -238,6 +238,7 @@ export interface CreateExternalCanisterOperationKindAddExisting {
 }
 export interface CreateExternalCanisterOperationKindCreateNew {
   'initial_cycles' : [] | [bigint],
+  'subnet_selection' : [] | [SubnetSelection],
 }
 export interface CreateRequestInput {
   'title' : [] | [string],
@@ -1095,6 +1096,9 @@ export type SubmitRequestApprovalResult = {
     }
   } |
   { 'Err' : Error };
+export interface SubnetFilter { 'subnet_type' : [] | [string] }
+export type SubnetSelection = { 'Filter' : SubnetFilter } |
+  { 'Subnet' : { 'subnet' : Principal } };
 export interface SystemInfo {
   'disaster_recovery' : [] | [DisasterRecovery],
   'name' : string,
@@ -1218,6 +1222,7 @@ export type UserPrivilege = { 'AddUserGroup' : null } |
   { 'ListAddressBookEntries' : null } |
   { 'ListExternalCanisters' : null } |
   { 'ListRequests' : null } |
+  { 'CallAnyExternalCanister' : null } |
   { 'SystemInfo' : null } |
   { 'Capabilities' : null } |
   { 'AddAccount' : null };
