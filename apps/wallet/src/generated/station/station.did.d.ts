@@ -267,6 +267,8 @@ export interface DefiniteCanisterSettings {
   'freezing_threshold' : bigint,
   'controllers' : Array<Principal>,
   'reserved_cycles_limit' : bigint,
+  'log_visibility' : LogVisibility,
+  'wasm_memory_limit' : bigint,
   'memory_allocation' : bigint,
   'compute_allocation' : bigint,
 }
@@ -274,6 +276,8 @@ export interface DefiniteCanisterSettingsInput {
   'freezing_threshold' : [] | [bigint],
   'controllers' : [] | [Array<Principal>],
   'reserved_cycles_limit' : [] | [bigint],
+  'log_visibility' : [] | [LogVisibility],
+  'wasm_memory_limit' : [] | [bigint],
   'memory_allocation' : [] | [bigint],
   'compute_allocation' : [] | [bigint],
 }
@@ -790,6 +794,8 @@ export type ListUsersResult = {
     }
   } |
   { 'Err' : Error };
+export type LogVisibility = { 'controllers' : null } |
+  { 'public' : null };
 export interface ManageSystemInfoOperation {
   'input' : ManageSystemInfoOperationInput,
 }
@@ -1239,8 +1245,8 @@ export type ValidationMethodResourceTarget = { 'No' : null } |
   { 'ValidationMethod' : CanisterMethod };
 export interface WasmModuleExtraChunks {
   'wasm_module_hash' : Uint8Array | number[],
-  'chunk_hashes_list' : Array<Uint8Array | number[]>,
   'store_canister' : Principal,
+  'extra_chunks_key' : string,
 }
 export interface _SERVICE {
   'canister_status' : ActorMethod<[CanisterStatusInput], CanisterStatusResult>,

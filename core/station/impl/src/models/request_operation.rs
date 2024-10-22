@@ -266,7 +266,7 @@ pub enum SystemUpgradeTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WasmModuleExtraChunks {
     pub store_canister: Principal,
-    pub chunk_hashes_list: Vec<Vec<u8>>,
+    pub extra_chunks_key: String,
     pub wasm_module_hash: Vec<u8>,
 }
 
@@ -544,12 +544,21 @@ pub enum ConfigureExternalCanisterOperationKind {
 
 #[storable]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LogVisibility {
+    Public,
+    Controllers,
+}
+
+#[storable]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefiniteCanisterSettingsInput {
     pub controllers: Option<Vec<Principal>>,
     pub compute_allocation: Option<candid::Nat>,
     pub memory_allocation: Option<candid::Nat>,
     pub freezing_threshold: Option<candid::Nat>,
     pub reserved_cycles_limit: Option<candid::Nat>,
+    pub log_visibility: Option<LogVisibility>,
+    pub wasm_memory_limit: Option<candid::Nat>,
 }
 
 #[storable]
