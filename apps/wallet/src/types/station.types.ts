@@ -80,6 +80,7 @@ export enum RequestDomains {
   Users = 'users',
   ExternalCanisters = 'external_canisters',
   System = 'system',
+  Assets = 'assets',
 }
 
 export interface ListAccountsArgs {
@@ -116,6 +117,12 @@ export enum RequestSpecifierEnum {
   CallExternalCanister = 'CallExternalCanister',
   FundExternalCanister = 'FundExternalCanister',
   SetDisasterRecovery = 'SetDisasterRecovery',
+  AddAsset = 'AddAsset',
+  EditAsset = 'EditAsset',
+  RemoveAsset = 'RemoveAsset',
+  AddNamedRule = 'AddNamedRule',
+  EditNamedRule = 'EditNamedRule',
+  RemoveNamedRule = 'RemoveNamedRule',
 }
 
 export enum RequestPolicyRuleEnum {
@@ -142,6 +149,13 @@ export interface ListAddressBookEntriesArgs {
   blockchain?: string;
   labels?: [];
   ids?: UUID[];
+  address_formats?: string[];
+  search_term?: string;
+}
+
+export interface ListAssetsArgs {
+  limit?: number;
+  offset?: number;
 }
 
 export interface ListExternalCanistersArgs {
@@ -178,6 +192,7 @@ export enum RequestOperationEnum {
   RemoveRequestPolicy = 'RemoveRequestPolicy',
   EditPermission = 'EditPermission',
   SystemUpgrade = 'SystemUpgrade',
+  SystemRestore = 'SystemRestore',
   Transfer = 'Transfer',
   ManageSystemInfo = 'ManageSystemInfo',
   ChangeExternalCanister = 'ChangeExternalCanister',
@@ -185,5 +200,15 @@ export enum RequestOperationEnum {
   CallExternalCanister = 'CallExternalCanister',
   ConfigureExternalCanister = 'ConfigureExternalCanister',
   FundExternalCanister = 'FundExternalCanister',
+  MonitorExternalCanister = 'MonitorExternalCanister',
+  SnapshotExternalCanister = 'SnapshotExternalCanister',
+  PruneExternalCanister = 'PruneExternalCanister',
+  RestoreExternalCanister = 'RestoreExternalCanister',
   SetDisasterRecovery = 'SetDisasterRecovery',
+  AddAsset = 'AddAsset',
+  EditAsset = 'EditAsset',
+  RemoveAsset = 'RemoveAsset',
+  AddNamedRule = 'AddNamedRule',
+  EditNamedRule = 'EditNamedRule',
+  RemoveNamedRule = 'RemoveNamedRule',
 }

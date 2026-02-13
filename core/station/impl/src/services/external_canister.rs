@@ -16,26 +16,28 @@ use crate::models::resource::{
 use crate::models::{
     AddRequestPolicyOperationInput, CanisterExecutionAndValidationMethodPairInput, CanisterMethod,
     ConfigureExternalCanisterSettingsInput, CreateExternalCanisterOperationInput,
-    CreateExternalCanisterOperationKind, DefiniteCanisterSettingsInput,
+    CreateExternalCanisterOperationKind, CycleObtainStrategy, DefiniteCanisterSettingsInput,
     EditPermissionOperationInput, EditRequestPolicyOperationInput, ExternalCanister,
     ExternalCanisterAvailableFilters, ExternalCanisterCallPermission,
     ExternalCanisterCallRequestPolicyRule, ExternalCanisterCallRequestPolicyRuleInput,
     ExternalCanisterCallerMethodsPrivileges, ExternalCanisterCallerPrivileges,
     ExternalCanisterChangeCallPermissionsInput, ExternalCanisterChangeCallRequestPoliciesInput,
     ExternalCanisterChangeRequestPolicyRule, ExternalCanisterEntryId, ExternalCanisterKey,
-    ExternalCanisterPermissions, ExternalCanisterPermissionsUpdateInput,
-    ExternalCanisterRequestPolicies, ExternalCanisterRequestPoliciesUpdateInput, RequestPolicy,
+    ExternalCanisterMonitoring, ExternalCanisterPermissions,
+    ExternalCanisterPermissionsUpdateInput, ExternalCanisterRequestPolicies,
+    ExternalCanisterRequestPoliciesUpdateInput, MonitorExternalCanisterStrategy, RequestPolicy,
 };
 use crate::repositories::permission::{PermissionRepository, PERMISSION_REPOSITORY};
 use crate::repositories::{
     ExternalCanisterRepository, ExternalCanisterWhereClause, RequestPolicyRepository,
     EXTERNAL_CANISTER_REPOSITORY, REQUEST_POLICY_REPOSITORY,
 };
+use crate::services::cycle_manager::{CycleManager, CYCLE_MANAGER};
 use candid::{Encode, Principal};
 use ic_cdk::api::call::call_raw;
 use ic_cdk::api::management_canister::main::{
     self as mgmt, delete_canister, deposit_cycles, stop_canister, update_settings,
-    CanisterIdRecord, CanisterStatusResponse, UpdateSettingsArgument,
+    CanisterIdRecord, CanisterStatusResponse, Snapshot, UpdateSettingsArgument,
 };
 use lazy_static::lazy_static;
 use orbit_essentials::api::ServiceResult;
@@ -55,6 +57,7 @@ use uuid::Uuid;
 lazy_static! {
     pub static ref EXTERNAL_CANISTER_SERVICE: Arc<ExternalCanisterService> =
         Arc::new(ExternalCanisterService::new(
+            Arc::clone(&CYCLE_MANAGER),
             Arc::clone(&EXTERNAL_CANISTER_REPOSITORY),
             Arc::clone(&PERMISSION_SERVICE),
             Arc::clone(&PERMISSION_REPOSITORY),
@@ -63,10 +66,11 @@ lazy_static! {
         ));
 }
 
-const CREATE_CANISTER_CYCLES: u128 = 325_000_000_000; // fee sufficient to create canisters on any ICP mainnet subnet
+const CREATE_CANISTER_CYCLES: u128 = 2_250_000_000_000; // fee sufficient to create canisters on any ICP mainnet subnet
 
 #[derive(Default, Debug)]
 pub struct ExternalCanisterService {
+    cycle_manager: Arc<CycleManager>,
     external_canister_repository: Arc<ExternalCanisterRepository>,
     permission_service: Arc<PermissionService>,
     permission_repository: Arc<PermissionRepository>,
@@ -79,6 +83,7 @@ impl ExternalCanisterService {
     const MAX_LIST_LIMIT: u16 = 250;
 
     pub fn new(
+        cycle_manager: Arc<CycleManager>,
         external_canister_repository: Arc<ExternalCanisterRepository>,
         permission_service: Arc<PermissionService>,
         permission_repository: Arc<PermissionRepository>,
@@ -86,6 +91,7 @@ impl ExternalCanisterService {
         request_policy_repository: Arc<RequestPolicyRepository>,
     ) -> Self {
         Self {
+            cycle_manager,
             external_canister_repository,
             permission_service,
             permission_repository,
@@ -114,14 +120,14 @@ impl ExternalCanisterService {
         &self,
         canister_id: &Principal,
     ) -> ServiceResult<ExternalCanister> {
-        let recource_id = self
+        let resource_id = self
             .external_canister_repository
             .find_by_canister_id(canister_id)
             .ok_or(ExternalCanisterError::InvalidExternalCanister {
                 principal: *canister_id,
             })?;
 
-        self.get_external_canister(&recource_id)
+        self.get_external_canister(&resource_id)
     }
 
     /// Returns all request policies of the external canister by its canister id.
@@ -330,7 +336,7 @@ impl ExternalCanisterService {
             },
         );
 
-        // filter out requests that the caller does not have access to read
+        // filter out external canisters that the caller does not have access to read
         retain_accessible_resources(ctx, &mut found_ids, |id| {
             Resource::ExternalCanister(ExternalCanisterResourceAction::Read(
                 ExternalCanisterId::Canister(*id),
@@ -414,11 +420,9 @@ impl ExternalCanisterService {
     /// The station needs to be a controller of the target canister.
     pub async fn canister_status(
         &self,
-        input: CanisterIdRecord,
+        canister_id: Principal,
     ) -> ServiceResult<CanisterStatusResponse> {
-        let canister_status_arg = CanisterIdRecord {
-            canister_id: input.canister_id,
-        };
+        let canister_status_arg = CanisterIdRecord { canister_id };
 
         let canister_status_response = mgmt::canister_status(canister_status_arg)
             .await
@@ -430,6 +434,22 @@ impl ExternalCanisterService {
         Ok(canister_status_response)
     }
 
+    /// Calls the management canister to get the snapshots of the canister with the given id.
+    ///
+    /// The station needs to be a controller of the target canister.
+    pub async fn canister_snapshots(&self, canister_id: Principal) -> ServiceResult<Vec<Snapshot>> {
+        let canister_snapshots_arg = CanisterIdRecord { canister_id };
+
+        let canister_snapshots_response = mgmt::list_canister_snapshots(canister_snapshots_arg)
+            .await
+            .map_err(|(_, err)| ExternalCanisterError::Failed {
+                reason: err.to_string(),
+            })?
+            .0;
+
+        Ok(canister_snapshots_response)
+    }
+
     /// Calls the target canister with the given method, argument, and cycles.
     pub async fn call_external_canister(
         &self,
@@ -438,7 +458,7 @@ impl ExternalCanisterService {
         arg: Option<Vec<u8>>,
         cycles: Option<u64>,
     ) -> ServiceResult<Vec<u8>, ExternalCanisterError> {
-        EnsureExternalCanister::is_external_canister(canister_id)?;
+        EnsureExternalCanister::ensure_external_canister(canister_id)?;
 
         call_raw(
             canister_id,
@@ -484,7 +504,7 @@ impl ExternalCanisterService {
                 external_canister
             }
             CreateExternalCanisterOperationKind::AddExisting(opts) => {
-                EnsureExternalCanister::is_external_canister(opts.canister_id)?;
+                EnsureExternalCanister::ensure_external_canister(opts.canister_id)?;
                 self.check_unique_canister_id(&opts.canister_id, None)?;
 
                 let external_canister =
@@ -510,12 +530,10 @@ impl ExternalCanisterService {
                 )),
             },
         )
-        .map_err(|err| {
+        .inspect_err(|_| {
             // remove the external canister if the permission configuration failed
             self.external_canister_repository
                 .remove(&external_canister.key());
-
-            err
         })?;
         self.configure_external_canister_request_policies(
             &external_canister,
@@ -529,12 +547,10 @@ impl ExternalCanisterService {
                 ),
             },
         )
-        .map_err(|err| {
+        .inspect_err(|_| {
             // remove the external canister if the request policy configuration failed
             self.external_canister_repository
                 .remove(&external_canister.key());
-
-            err
         })?;
 
         Ok(external_canister)
@@ -1018,6 +1034,71 @@ impl ExternalCanisterService {
         Ok(())
     }
 
+    /// Restarts monitoring for all external canisters after upgrade
+    pub fn canister_monitor_restart(&self) {
+        for canister in self.external_canister_repository.find_all() {
+            if let Some(monitoring) = &canister.monitoring {
+                self.cycle_manager.add_canister(
+                    canister.canister_id,
+                    monitoring.funding_strategy.clone(),
+                    monitoring.cycle_obtain_strategy,
+                );
+            }
+        }
+    }
+
+    pub fn canister_monitor_start(
+        &self,
+        canister_id: Principal,
+        strategy: MonitorExternalCanisterStrategy,
+        cycle_obtain_strategy: Option<CycleObtainStrategy>,
+    ) -> ServiceResult<()> {
+        if let Some(CycleObtainStrategy::MintFromNativeToken { .. }) = cycle_obtain_strategy {
+            Err(ExternalCanisterError::Failed {
+                reason: format!(
+                    "Minting from native token is not yet supported for canister {}",
+                    canister_id.to_text()
+                ),
+            })?;
+        }
+
+        let mut external_canister = self.get_external_canister_by_canister_id(&canister_id)?;
+        if external_canister.monitoring.is_some() {
+            Err(ExternalCanisterError::Failed {
+                reason: format!(
+                    "Failed to monitor canister {}. The canister is already monitored.",
+                    canister_id.to_text(),
+                ),
+            })?;
+        }
+
+        self.cycle_manager
+            .add_canister(canister_id, strategy.clone(), cycle_obtain_strategy);
+
+        external_canister.monitoring = Some(ExternalCanisterMonitoring {
+            funding_strategy: strategy,
+            cycle_obtain_strategy,
+        });
+
+        self.external_canister_repository
+            .insert(external_canister.key(), external_canister.clone());
+
+        Ok(())
+    }
+
+    pub fn canister_monitor_stop(&self, canister_id: Principal) -> ServiceResult<()> {
+        let mut external_canister = self.get_external_canister_by_canister_id(&canister_id)?;
+
+        self.cycle_manager.remove_canister(canister_id);
+
+        external_canister.monitoring = None;
+
+        self.external_canister_repository
+            .insert(external_canister.key(), external_canister.clone());
+
+        Ok(())
+    }
+
     /// Only deletes the external canister from the system.
     pub fn soft_delete_external_canister(
         &self,
@@ -1120,7 +1201,7 @@ impl ExternalCanisterService {
         // The soft delete is done after the hard delete to ensure that the external canister
         // is removed from the subnet before it is removed from the system.
         //
-        // The intercanister call is more likely to fail than the local operation.
+        // The inter-canister call is more likely to fail than the local operation.
         self.soft_delete_external_canister(id)?;
 
         Ok(external_canister)
@@ -1194,6 +1275,8 @@ impl ExternalCanisterService {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::{
         core::test_utils,
@@ -1213,7 +1296,7 @@ mod tests {
             ExternalCanisterChangeCallPermissionsInput,
             ExternalCanisterChangeCallRequestPoliciesInput,
             ExternalCanisterChangeRequestPolicyRuleInput, ExternalCanisterPermissionsCreateInput,
-            ExternalCanisterRequestPoliciesCreateInput, RequestPolicyRule,
+            ExternalCanisterRequestPoliciesCreateInput, Metadata, RequestPolicyRule,
         },
     };
     use orbit_essentials::api::ApiError;
@@ -1230,6 +1313,7 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: None,
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -1337,6 +1421,7 @@ mod tests {
             name: "test".to_string(),
             description: None,
             labels: None,
+            metadata: None,
             permissions: ExternalCanisterPermissionsCreateInput {
                 read: Allow::authenticated(),
                 change: Allow::authenticated(),
@@ -1437,6 +1522,7 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: None,
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -1520,6 +1606,7 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: None,
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -1566,6 +1653,7 @@ mod tests {
                     name: "test".to_string(),
                     description: None,
                     labels: None,
+                    metadata: None,
                     permissions: ExternalCanisterPermissionsCreateInput {
                         read: Allow::authenticated(),
                         change: Allow::authenticated(),
@@ -1600,6 +1688,7 @@ mod tests {
                     name: format!("test{}", i),
                     description: None,
                     labels: None,
+                    metadata: None,
                     permissions: ExternalCanisterPermissionsCreateInput {
                         read: Allow::authenticated(),
                         change: Allow::authenticated(),
@@ -1633,6 +1722,7 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: None,
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -1667,6 +1757,10 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: Some(Metadata::new(BTreeMap::from([
+                    ("key1".to_string(), "value1".to_string()),
+                    ("key2".to_string(), "value2".to_string()),
+                ]))),
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -1697,6 +1791,9 @@ mod tests {
                         name: Some("test2".to_string()),
                         description: None,
                         labels: None,
+                        change_metadata: Some(crate::models::ChangeMetadata::OverrideSpecifiedBy(
+                            BTreeMap::from([("key2".to_string(), "test".to_string())]),
+                        )),
                         state: None,
                         permissions: Some(ExternalCanisterPermissionsUpdateInput {
                             read: Some(Allow::authenticated()),
@@ -1718,6 +1815,13 @@ mod tests {
                 .unwrap();
 
         assert_eq!(updated_canister.name, "test2");
+        assert_eq!(
+            updated_canister.metadata,
+            Metadata::new(BTreeMap::from([
+                ("key1".to_string(), "value1".to_string()),
+                ("key2".to_string(), "test".to_string())
+            ]))
+        );
 
         let call_permission = PERMISSION_REPOSITORY
             .find_external_canister_call_permissions(&updated_canister.canister_id);
@@ -1733,6 +1837,7 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: None,
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -1835,6 +1940,7 @@ mod tests {
                         name: None,
                         description: None,
                         labels: None,
+                        change_metadata: None,
                         state: None,
                         permissions: Some(ExternalCanisterPermissionsUpdateInput {
                             read: None,
@@ -1924,6 +2030,7 @@ mod tests {
                         name: None,
                         description: None,
                         labels: None,
+                        change_metadata: None,
                         state: None,
                         permissions: Some(ExternalCanisterPermissionsUpdateInput {
                             read: None,
@@ -1972,6 +2079,7 @@ mod tests {
                         name: None,
                         description: None,
                         labels: None,
+                        change_metadata: None,
                         state: None,
                         permissions: Some(ExternalCanisterPermissionsUpdateInput {
                             read: None,
@@ -2028,6 +2136,7 @@ mod tests {
                     name: format!("test{}", i),
                     description: None,
                     labels: None,
+                    metadata: None,
                     permissions: ExternalCanisterPermissionsCreateInput {
                         read: Allow::authenticated(),
                         change: Allow::authenticated(),
@@ -2080,6 +2189,7 @@ mod tests {
                     name: format!("test{}", i),
                     description: None,
                     labels: None,
+                    metadata: None,
                     permissions: ExternalCanisterPermissionsCreateInput {
                         read: Allow::authenticated(),
                         change: Allow::authenticated(),
@@ -2128,6 +2238,7 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: None,
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -2151,6 +2262,7 @@ mod tests {
                 name: "test".to_string(),
                 description: None,
                 labels: None,
+                metadata: None,
                 permissions: ExternalCanisterPermissionsCreateInput {
                     read: Allow::authenticated(),
                     change: Allow::authenticated(),
@@ -2189,6 +2301,7 @@ mod tests {
                         name: format!("test{}", i),
                         description: None,
                         labels: None,
+                        metadata: None,
                         permissions: ExternalCanisterPermissionsCreateInput {
                             read: Allow::authenticated(),
                             change: Allow::authenticated(),
@@ -2216,6 +2329,7 @@ mod tests {
                     name: Some(external_canisters[0].name.to_string()),
                     description: None,
                     labels: None,
+                    change_metadata: None,
                     state: None,
                     permissions: None,
                     request_policies: None,
@@ -2231,6 +2345,7 @@ mod tests {
                 name: Some("test1".to_string()),
                 description: None,
                 labels: None,
+                change_metadata: None,
                 state: None,
                 permissions: None,
                 request_policies: None,
@@ -2268,7 +2383,7 @@ mod benchs {
             .expect("Unexpected admin identity not available");
 
         let first_admin = first_admin.clone();
-        let caller_identity = first_admin_identity.clone();
+        let caller_identity = *first_admin_identity;
 
         // these should only be accessible to admins
         add_test_external_canisters(
@@ -2358,14 +2473,16 @@ mod external_canister_test_utils {
 
             EXTERNAL_CANISTER_REPOSITORY.insert(external_canister.key(), external_canister.clone());
 
-            let mut input = ConfigureExternalCanisterSettingsInput::default();
-            input.permissions = Some(ExternalCanisterPermissionsUpdateInput {
-                calls: Some(ExternalCanisterChangeCallPermissionsInput::ReplaceAllBy(
-                    calls,
-                )),
-                read: Some(allow.clone()),
-                change: Some(allow.clone()),
-            });
+            let input = ConfigureExternalCanisterSettingsInput {
+                permissions: Some(ExternalCanisterPermissionsUpdateInput {
+                    calls: Some(ExternalCanisterChangeCallPermissionsInput::ReplaceAllBy(
+                        calls,
+                    )),
+                    read: Some(allow.clone()),
+                    change: Some(allow.clone()),
+                }),
+                ..Default::default()
+            };
 
             EXTERNAL_CANISTER_SERVICE
                 .edit_external_canister(&external_canister.id, input)

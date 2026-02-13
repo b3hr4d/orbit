@@ -8,8 +8,17 @@
             :tooltip="$t('app.account_dialog_access_read_hint')"
           />
         </VCardTitle>
-        <VCardText class="py-0">
-          <AllowInput v-model="model.read" :mode="props.mode" />
+        <VCardText>
+          <DiffView :before-value="props.currentPermissions?.read" :after-value="model.read">
+            <template #default="{ value, diffMode }">
+              <AllowInput
+                v-if="value"
+                :model-value="value"
+                :mode="diffMode === 'before' ? 'view' : props.mode"
+                @update:model-value="val => diffMode === 'after' && (model.read = val)"
+              />
+            </template>
+          </DiffView>
         </VCardText>
       </VCard>
     </VCol>
@@ -22,8 +31,20 @@
             :tooltip="$t('app.account_dialog_access_configuration_hint')"
           />
         </VCardTitle>
-        <VCardText class="py-0">
-          <AllowInput v-model="model.configuration" :mode="props.mode" />
+        <VCardText>
+          <DiffView
+            :before-value="props.currentPermissions?.configuration"
+            :after-value="model.configuration"
+          >
+            <template #default="{ value, diffMode }">
+              <AllowInput
+                v-if="value"
+                :model-value="value"
+                :mode="diffMode === 'before' ? 'view' : props.mode"
+                @update:model-value="val => diffMode === 'after' && (model.configuration = val)"
+              />
+            </template>
+          </DiffView>
         </VCardText>
       </VCard>
     </VCol>
@@ -36,8 +57,20 @@
             :tooltip="$t('app.account_dialog_access_transfer_hint')"
           />
         </VCardTitle>
-        <VCardText class="py-0">
-          <AllowInput v-model="model.transfer" :mode="props.mode" />
+        <VCardText>
+          <DiffView
+            :before-value="props.currentPermissions?.transfer"
+            :after-value="model.transfer"
+          >
+            <template #default="{ value, diffMode }">
+              <AllowInput
+                v-if="value"
+                :model-value="value"
+                :mode="diffMode === 'before' ? 'view' : props.mode"
+                @update:model-value="val => diffMode === 'after' && (model.transfer = val)"
+              />
+            </template>
+          </DiffView>
         </VCardText>
       </VCard>
     </VCol>
@@ -49,6 +82,7 @@ import { VCard, VCardText, VCardTitle, VCol, VDivider, VRow } from 'vuetify/comp
 import TextLabel from '~/components/ui/TextLabel.vue';
 import AllowInput from '~/components/inputs/AllowInput.vue';
 import { Allow } from '~/generated/station/station.did';
+import DiffView from '~/components/requests/DiffView.vue';
 
 export interface AccountPermissionModel {
   read: Allow;
@@ -60,9 +94,11 @@ const props = withDefaults(
   defineProps<{
     modelValue: AccountPermissionModel;
     mode?: 'view' | 'edit';
+    currentPermissions?: AccountPermissionModel;
   }>(),
   {
     mode: 'edit',
+    currentPermissions: undefined,
   },
 );
 

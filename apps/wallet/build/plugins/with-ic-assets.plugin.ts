@@ -11,7 +11,14 @@ const getContentSecurityPolicy = (
   const csp: Record<string, string[]> = {
     'default-src': ["'none'"],
     'script-src': ["'self'", "'wasm-unsafe-eval'"],
-    'connect-src': ["'self'", 'https://icp-api.io', 'https://ic0.app', 'https://icp0.io'],
+    'worker-src': ["'self'", 'blob:'],
+    'connect-src': [
+      "'self'",
+      'https://icp-api.io',
+      'https://ic0.app',
+      'https://icp0.io',
+      'https://3r4gx-wqaaa-aaaaq-aaaia-cai.icp0.io', // SNS aggregator
+    ],
     'img-src': ["'self'", 'data:'],
     'font-src': ["'self'"],
     'object-src': ["'none'"],
@@ -45,6 +52,14 @@ const createICAssetsJson = (
   return {
     well_known: {
       match: '.well-known',
+      ignore: false,
+    },
+    well_known_ii: {
+      match: '.well-known/ii-alternative-origins',
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json',
+      },
       ignore: false,
     },
     all: {
@@ -81,15 +96,17 @@ const createICAssetsJson = (
 };
 
 export const withIcAssetsFile = (
-  isProduction = true,
-  publicDir = 'public',
-  fileName = '.ic-assets.json',
+  opts: { isProduction?: boolean; publicDir?: string; fileName?: string } = {},
 ): Plugin => {
+  const isProduction = opts.isProduction ?? true;
+  const publicDir = opts.publicDir ?? 'public';
+  const fileName = opts.fileName ?? '.ic-assets.json';
+
   return {
     name: 'with-ic-assets',
     writeBundle({ dir }) {
       const icAssetsPath = resolve(__dirname, '../..', publicDir, fileName);
-      const indexHtml = resolve(dir, 'index.html');
+      const indexHtml = resolve(dir!, 'index.html');
       const indexContent = readFileSync(indexHtml, { encoding: 'utf-8' });
       const virtualDOM = load(indexContent);
       const dynamicCspHeaders: Record<string, string[]> = {

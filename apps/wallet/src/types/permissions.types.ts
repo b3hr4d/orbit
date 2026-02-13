@@ -13,6 +13,8 @@ export enum ResourceTypeEnum {
   ExternalCanister = 'ExternalCanister',
   SetDisasterRecovery = 'SetDisasterRecovery',
   Notification = 'Notification',
+  Asset = 'Asset',
+  NamedRule = 'NamedRule',
 }
 
 export enum ResourceActionEnum {

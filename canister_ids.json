@@ -8,5 +8,15 @@
     "playground": "b6jmw-iqaaa-aaaal-ai6uq-cai",
     "production": "5mxvd-qaaaa-aaaal-ajbkq-cai",
     "testing": "lotbt-qqaaa-aaaal-aduzq-cai"
+  },
+  "app_marketing": {
+    "production": "kguhj-fyaaa-aaaaa-qad6a-cai"
+  },
+  "docs_portal": {
+    "production": "bp6mw-eqaaa-aaaac-ahroq-cai"
+  },
+  "wasm_chunk_store": {
+    "playground": "lwcm6-3aaaa-aaaam-qb7ba-cai",
+    "production": "f2mu6-kiaaa-aaaam-advhq-cai"
   }
 }

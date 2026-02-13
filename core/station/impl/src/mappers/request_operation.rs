@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use super::{blockchain::BlockchainMapper, HelperMapper};
 use crate::{
     models::{
@@ -8,8 +10,10 @@ use crate::{
             UserResourceAction,
         },
         Account, AccountKey, AddAccountOperation, AddAccountOperationInput,
-        AddAddressBookEntryOperation, AddAddressBookEntryOperationInput, AddRequestPolicyOperation,
-        AddRequestPolicyOperationInput, AddUserOperation, AddUserOperationInput, AddressBookEntry,
+        AddAddressBookEntryOperation, AddAddressBookEntryOperationInput, AddAssetOperation,
+        AddAssetOperationInput, AddNamedRuleOperation, AddNamedRuleOperationInput,
+        AddRequestPolicyOperation, AddRequestPolicyOperationInput, AddUserOperation,
+        AddUserOperationInput, AddressBookEntry, AddressFormat, Asset,
         CallExternalCanisterOperation, CallExternalCanisterOperationInput,
         CanisterExecutionAndValidationMethodPairInput, CanisterInstallMode,
         CanisterInstallModeArgs, CanisterMethod, CanisterReinstallModeArgs,
@@ -20,10 +24,12 @@ use crate::{
         CreateExternalCanisterOperationKind, CreateExternalCanisterOperationKindAddExisting,
         CreateExternalCanisterOperationKindCreateNew, CycleObtainStrategy,
         DefiniteCanisterSettingsInput, DisasterRecoveryCommittee, EditAccountOperation,
-        EditAccountOperationInput, EditAddressBookEntryOperation, EditPermissionOperation,
-        EditPermissionOperationInput, EditRequestPolicyOperation, EditRequestPolicyOperationInput,
-        EditUserGroupOperation, EditUserOperation, EditUserOperationInput,
-        ExternalCanisterCallPermission, ExternalCanisterCallPermissionExecMethodEntryInput,
+        EditAccountOperationInput, EditAddressBookEntryOperation, EditAssetOperation,
+        EditAssetOperationInput, EditNamedRuleOperation, EditNamedRuleOperationInput,
+        EditPermissionOperation, EditPermissionOperationInput, EditRequestPolicyOperation,
+        EditRequestPolicyOperationInput, EditUserGroupOperation, EditUserOperation,
+        EditUserOperationInput, ExternalCanisterCallPermission,
+        ExternalCanisterCallPermissionExecMethodEntryInput,
         ExternalCanisterCallPermissionMethodPairInput,
         ExternalCanisterCallPermissionsExecMethodInput,
         ExternalCanisterCallRequestPoliciesExecMethodInput,
@@ -34,15 +40,22 @@ use crate::{
         ExternalCanisterChangeRequestPolicyRuleInput, ExternalCanisterPermissionsCreateInput,
         ExternalCanisterPermissionsUpdateInput, ExternalCanisterRequestPoliciesCreateInput,
         ExternalCanisterRequestPoliciesUpdateInput, FundExternalCanisterOperation, LogVisibility,
-        ManageSystemInfoOperation, ManageSystemInfoOperationInput, RemoveAddressBookEntryOperation,
-        RemoveRequestPolicyOperation, RemoveRequestPolicyOperationInput, RemoveUserGroupOperation,
-        RequestOperation, SetDisasterRecoveryOperation, SetDisasterRecoveryOperationInput,
+        ManageSystemInfoOperation, ManageSystemInfoOperationInput,
+        MonitorExternalCanisterOperation, NamedRule, NamedRuleKey, PruneExternalCanisterOperation,
+        PruneExternalCanisterOperationInput, PruneExternalCanisterResource,
+        RemoveAddressBookEntryOperation, RemoveAssetOperation, RemoveAssetOperationInput,
+        RemoveNamedRuleOperation, RemoveNamedRuleOperationInput, RemoveRequestPolicyOperation,
+        RemoveRequestPolicyOperationInput, RemoveUserGroupOperation, RequestOperation,
+        RestoreExternalCanisterOperation, RestoreExternalCanisterOperationInput,
+        SetDisasterRecoveryOperation, SetDisasterRecoveryOperationInput,
+        SnapshotExternalCanisterOperation, SnapshotExternalCanisterOperationInput,
+        SystemRestoreOperation, SystemRestoreOperationInput, SystemRestoreTarget,
         SystemUpgradeOperation, SystemUpgradeOperationInput, SystemUpgradeTarget,
         TransferOperation, User, WasmModuleExtraChunks,
     },
     repositories::{
-        AccountRepository, AddressBookRepository, UserRepository, ACCOUNT_REPOSITORY,
-        USER_GROUP_REPOSITORY,
+        AccountRepository, AddressBookRepository, AssetRepository, NamedRuleRepository,
+        UserRepository, ACCOUNT_REPOSITORY, USER_GROUP_REPOSITORY,
     },
 };
 use orbit_essentials::repository::Repository;
@@ -50,7 +63,9 @@ use station_api::{
     AddAccountOperationDTO, AddAddressBookEntryOperationDTO, AddUserOperationDTO,
     CallExternalCanisterOperationDTO, CanisterMethodDTO, ChangeExternalCanisterOperationDTO,
     CreateExternalCanisterOperationDTO, EditAccountOperationDTO, EditAddressBookEntryOperationDTO,
-    EditUserOperationDTO, NetworkDTO, RemoveAddressBookEntryOperationDTO, RequestOperationDTO,
+    EditUserOperationDTO, NetworkDTO, PruneExternalCanisterOperationDTO,
+    PruneExternalCanisterResourceDTO, RemoveAddressBookEntryOperationDTO, RequestOperationDTO,
+    RestoreExternalCanisterOperationDTO, SnapshotExternalCanisterOperationDTO,
     TransferOperationDTO,
 };
 use uuid::Uuid;
@@ -59,6 +74,7 @@ impl TransferOperation {
     pub fn to_dto(self, account: Option<Account>) -> TransferOperationDTO {
         TransferOperationDTO {
             from_account: account.map(|account| account.to_dto()),
+            from_asset: self.asset.into(),
             network: NetworkDTO {
                 id: self.input.network.clone(),
                 name: self.input.network.clone(),
@@ -67,6 +83,10 @@ impl TransferOperation {
                 from_account_id: Uuid::from_bytes(self.input.from_account_id)
                     .hyphenated()
                     .to_string(),
+                from_asset_id: Uuid::from_bytes(self.input.from_asset_id)
+                    .hyphenated()
+                    .to_string(),
+                with_standard: self.input.with_standard.to_string(),
                 amount: self.input.amount,
                 to: self.input.to,
                 fee: self.input.fee,
@@ -90,8 +110,12 @@ impl AddAccountOperation {
             account: account.map(|account: Account| account.to_dto()),
             input: station_api::AddAccountOperationInput {
                 name: self.input.name,
-                blockchain: self.input.blockchain.to_string(),
-                standard: self.input.standard.to_string(),
+                assets: self
+                    .input
+                    .assets
+                    .into_iter()
+                    .map(|id| Uuid::from_bytes(id).hyphenated().to_string())
+                    .collect(),
                 metadata: self.input.metadata.into_vec_dto(),
                 read_permission: self.input.read_permission.into(),
                 transfer_permission: self.input.transfer_permission.into(),
@@ -120,10 +144,15 @@ impl From<station_api::AddAccountOperationInput> for AddAccountOperationInput {
     fn from(input: station_api::AddAccountOperationInput) -> AddAccountOperationInput {
         AddAccountOperationInput {
             name: input.name,
-            blockchain: BlockchainMapper::to_blockchain(input.blockchain.clone())
-                .expect("Invalid blockchain"),
-            standard: BlockchainMapper::to_blockchain_standard(input.standard)
-                .expect("Invalid blockchain standard"),
+            assets: input
+                .assets
+                .iter()
+                .map(|id| {
+                    *HelperMapper::to_uuid(id.clone())
+                        .expect("Invalid asset id")
+                        .as_bytes()
+                })
+                .collect(),
             metadata: input.metadata.into(),
             read_permission: input.read_permission.into(),
             configs_permission: input.configs_permission.into(),
@@ -142,6 +171,10 @@ impl From<EditAccountOperation> for EditAccountOperationDTO {
                     .hyphenated()
                     .to_string(),
                 name: operation.input.name,
+                change_assets: operation
+                    .input
+                    .change_assets
+                    .map(|change_assets| change_assets.into()),
                 read_permission: operation.input.read_permission.map(|policy| policy.into()),
                 transfer_permission: operation
                     .input
@@ -170,6 +203,9 @@ impl From<station_api::EditAccountOperationInput> for EditAccountOperationInput 
             account_id: *HelperMapper::to_uuid(input.account_id)
                 .expect("Invalid account id")
                 .as_bytes(),
+            change_assets: input
+                .change_assets
+                .map(|change_assets| change_assets.into()),
             name: input.name,
             read_permission: input.read_permission.map(|policy| policy.into()),
             transfer_permission: input.transfer_permission.map(|policy| policy.into()),
@@ -191,6 +227,7 @@ impl AddAddressBookEntryOperation {
             input: station_api::AddAddressBookEntryOperationInput {
                 address_owner: self.input.address_owner,
                 address: self.input.address,
+                address_format: self.input.address_format.to_string(),
                 blockchain: self.input.blockchain.to_string(),
                 metadata: self.input.metadata.into_iter().map(Into::into).collect(),
                 labels: self.input.labels,
@@ -205,6 +242,8 @@ impl From<station_api::AddAddressBookEntryOperationInput> for AddAddressBookEntr
     ) -> AddAddressBookEntryOperationInput {
         AddAddressBookEntryOperationInput {
             address_owner: input.address_owner,
+            address_format: AddressFormat::from_str(&input.address_format)
+                .expect("Invalid address format"),
             address: input.address,
             blockchain: BlockchainMapper::to_blockchain(input.blockchain.clone())
                 .expect("Invalid blockchain"),
@@ -381,6 +420,7 @@ impl From<SystemUpgradeOperationInput> for station_api::SystemUpgradeOperationIn
             module: input.module,
             module_extra_chunks: input.module_extra_chunks.map(|c| c.into()),
             arg: input.arg,
+            take_backup_snapshot: input.take_backup_snapshot,
         }
     }
 }
@@ -392,6 +432,7 @@ impl From<station_api::SystemUpgradeOperationInput> for SystemUpgradeOperationIn
             module: input.module,
             module_extra_chunks: input.module_extra_chunks.map(|c| c.into()),
             arg: input.arg,
+            take_backup_snapshot: input.take_backup_snapshot,
         }
     }
 }
@@ -402,6 +443,64 @@ impl From<SystemUpgradeOperation> for station_api::SystemUpgradeOperationDTO {
             target: operation.input.target.into(),
             module_checksum: hex::encode(operation.module_checksum),
             arg_checksum: operation.arg_checksum.map(hex::encode),
+            take_backup_snapshot: operation.take_backup_snapshot,
+        }
+    }
+}
+
+impl From<SystemRestoreTarget> for station_api::SystemRestoreTargetDTO {
+    fn from(value: SystemRestoreTarget) -> Self {
+        match value {
+            SystemRestoreTarget::RestoreStation => {
+                station_api::SystemRestoreTargetDTO::RestoreStation
+            }
+            SystemRestoreTarget::RestoreUpgrader => {
+                station_api::SystemRestoreTargetDTO::RestoreUpgrader
+            }
+        }
+    }
+}
+
+impl From<station_api::SystemRestoreTargetDTO> for SystemRestoreTarget {
+    fn from(value: station_api::SystemRestoreTargetDTO) -> Self {
+        match value {
+            station_api::SystemRestoreTargetDTO::RestoreStation => {
+                SystemRestoreTarget::RestoreStation
+            }
+            station_api::SystemRestoreTargetDTO::RestoreUpgrader => {
+                SystemRestoreTarget::RestoreUpgrader
+            }
+        }
+    }
+}
+
+impl From<SystemRestoreOperationInput> for station_api::SystemRestoreOperationInput {
+    fn from(input: SystemRestoreOperationInput) -> station_api::SystemRestoreOperationInput {
+        station_api::SystemRestoreOperationInput {
+            target: input.target.into(),
+            snapshot_id: hex::encode(&input.snapshot_id),
+        }
+    }
+}
+
+impl From<station_api::SystemRestoreOperationInput> for SystemRestoreOperationInput {
+    fn from(input: station_api::SystemRestoreOperationInput) -> SystemRestoreOperationInput {
+        SystemRestoreOperationInput {
+            target: input.target.into(),
+            snapshot_id: hex::decode(&input.snapshot_id).unwrap_or_else(|err| {
+                ic_cdk::trap(&format!(
+                    "Failed to decode snapshot id {} to hex: {}",
+                    input.snapshot_id, err
+                ))
+            }),
+        }
+    }
+}
+
+impl From<SystemRestoreOperation> for station_api::SystemRestoreOperationDTO {
+    fn from(operation: SystemRestoreOperation) -> station_api::SystemRestoreOperationDTO {
+        station_api::SystemRestoreOperationDTO {
+            input: operation.input.into(),
         }
     }
 }
@@ -570,6 +669,7 @@ impl From<ConfigureExternalCanisterSettingsInput>
             name: input.name,
             description: input.description,
             labels: input.labels,
+            change_metadata: input.change_metadata.map(Into::into),
             state: input.state.map(Into::into),
             permissions: input.permissions.map(Into::into),
             request_policies: input.request_policies.map(Into::into),
@@ -582,6 +682,9 @@ impl From<LogVisibility> for station_api::LogVisibility {
         match input {
             LogVisibility::Public => station_api::LogVisibility::Public,
             LogVisibility::Controllers => station_api::LogVisibility::Controllers,
+            LogVisibility::AllowedViewers(principals) => {
+                station_api::LogVisibility::AllowedViewers(principals)
+            }
         }
     }
 }
@@ -1189,6 +1292,7 @@ impl From<CreateExternalCanisterOperationInput>
             name: input.name,
             description: input.description,
             labels: input.labels,
+            metadata: input.metadata.map(|m| m.into()),
             permissions: input.permissions.into(),
             request_policies: input.request_policies.into(),
         }
@@ -1206,6 +1310,7 @@ impl From<station_api::CreateExternalCanisterOperationInput>
             name: input.name,
             description: input.description,
             labels: input.labels,
+            metadata: input.metadata.map(|m| m.into()),
             permissions: input.permissions.into(),
             request_policies: input.request_policies.into(),
         }
@@ -1276,6 +1381,158 @@ impl From<CallExternalCanisterOperation> for CallExternalCanisterOperationDTO {
             execution_method_reply: operation.execution_method_reply,
             // By default this field is not set to avoid having responses that could be too large
             arg: None,
+        }
+    }
+}
+
+impl From<SnapshotExternalCanisterOperationInput>
+    for station_api::SnapshotExternalCanisterOperationInput
+{
+    fn from(
+        input: SnapshotExternalCanisterOperationInput,
+    ) -> station_api::SnapshotExternalCanisterOperationInput {
+        station_api::SnapshotExternalCanisterOperationInput {
+            canister_id: input.canister_id,
+            replace_snapshot: input.replace_snapshot.map(hex::encode),
+            force: input.force,
+        }
+    }
+}
+
+impl From<station_api::SnapshotExternalCanisterOperationInput>
+    for SnapshotExternalCanisterOperationInput
+{
+    fn from(
+        input: station_api::SnapshotExternalCanisterOperationInput,
+    ) -> SnapshotExternalCanisterOperationInput {
+        SnapshotExternalCanisterOperationInput {
+            canister_id: input.canister_id,
+            replace_snapshot: input.replace_snapshot.map(|snapshot_id| {
+                hex::decode(&snapshot_id).unwrap_or_else(|err| {
+                    ic_cdk::trap(&format!(
+                        "Failed to decode snapshot id {} to hex: {}",
+                        snapshot_id, err
+                    ))
+                })
+            }),
+            force: input.force,
+        }
+    }
+}
+
+impl From<SnapshotExternalCanisterOperation> for SnapshotExternalCanisterOperationDTO {
+    fn from(operation: SnapshotExternalCanisterOperation) -> SnapshotExternalCanisterOperationDTO {
+        SnapshotExternalCanisterOperationDTO {
+            input: operation.input.into(),
+            snapshot_id: operation.snapshot_id.map(hex::encode),
+        }
+    }
+}
+
+impl From<RestoreExternalCanisterOperationInput>
+    for station_api::RestoreExternalCanisterOperationInput
+{
+    fn from(
+        input: RestoreExternalCanisterOperationInput,
+    ) -> station_api::RestoreExternalCanisterOperationInput {
+        station_api::RestoreExternalCanisterOperationInput {
+            canister_id: input.canister_id,
+            snapshot_id: hex::encode(&input.snapshot_id),
+        }
+    }
+}
+
+impl From<station_api::RestoreExternalCanisterOperationInput>
+    for RestoreExternalCanisterOperationInput
+{
+    fn from(
+        input: station_api::RestoreExternalCanisterOperationInput,
+    ) -> RestoreExternalCanisterOperationInput {
+        RestoreExternalCanisterOperationInput {
+            canister_id: input.canister_id,
+            snapshot_id: hex::decode(&input.snapshot_id).unwrap_or_else(|err| {
+                ic_cdk::trap(&format!(
+                    "Failed to decode snapshot id {} to hex: {}",
+                    input.snapshot_id, err
+                ))
+            }),
+        }
+    }
+}
+
+impl From<RestoreExternalCanisterOperation> for RestoreExternalCanisterOperationDTO {
+    fn from(operation: RestoreExternalCanisterOperation) -> RestoreExternalCanisterOperationDTO {
+        RestoreExternalCanisterOperationDTO {
+            input: operation.input.into(),
+        }
+    }
+}
+
+impl From<PruneExternalCanisterResource> for PruneExternalCanisterResourceDTO {
+    fn from(input: PruneExternalCanisterResource) -> PruneExternalCanisterResourceDTO {
+        match input {
+            PruneExternalCanisterResource::Snapshot(snapshot_id) => {
+                PruneExternalCanisterResourceDTO::Snapshot(hex::encode(snapshot_id))
+            }
+            PruneExternalCanisterResource::ChunkStore => {
+                PruneExternalCanisterResourceDTO::ChunkStore
+            }
+            PruneExternalCanisterResource::State => PruneExternalCanisterResourceDTO::State,
+        }
+    }
+}
+
+impl From<PruneExternalCanisterResourceDTO> for PruneExternalCanisterResource {
+    fn from(input: PruneExternalCanisterResourceDTO) -> PruneExternalCanisterResource {
+        match input {
+            PruneExternalCanisterResourceDTO::Snapshot(snapshot_id) => {
+                PruneExternalCanisterResource::Snapshot(hex::decode(&snapshot_id).unwrap_or_else(
+                    |err| {
+                        ic_cdk::trap(&format!(
+                            "Failed to convert snapshot id {} to hex: {}",
+                            snapshot_id, err
+                        ))
+                    },
+                ))
+            }
+            PruneExternalCanisterResourceDTO::ChunkStore => {
+                PruneExternalCanisterResource::ChunkStore
+            }
+            PruneExternalCanisterResourceDTO::State => PruneExternalCanisterResource::State,
+        }
+    }
+}
+
+impl From<PruneExternalCanisterOperationInput>
+    for station_api::PruneExternalCanisterOperationInput
+{
+    fn from(
+        input: PruneExternalCanisterOperationInput,
+    ) -> station_api::PruneExternalCanisterOperationInput {
+        station_api::PruneExternalCanisterOperationInput {
+            canister_id: input.canister_id,
+            prune: input.prune.into(),
+        }
+    }
+}
+
+impl From<station_api::PruneExternalCanisterOperationInput>
+    for PruneExternalCanisterOperationInput
+{
+    fn from(
+        input: station_api::PruneExternalCanisterOperationInput,
+    ) -> PruneExternalCanisterOperationInput {
+        PruneExternalCanisterOperationInput {
+            canister_id: input.canister_id,
+            prune: input.prune.into(),
+        }
+    }
+}
+
+impl From<PruneExternalCanisterOperation> for PruneExternalCanisterOperationDTO {
+    fn from(operation: PruneExternalCanisterOperation) -> PruneExternalCanisterOperationDTO {
+        PruneExternalCanisterOperationDTO {
+            input: operation.input.into(),
         }
     }
 }
@@ -1440,6 +1697,13 @@ impl From<station_api::CycleObtainStrategyDTO> for CycleObtainStrategy {
                         .as_bytes(),
                 }
             }
+            station_api::CycleObtainStrategyDTO::WithdrawFromCyclesLedger {
+                account_id, ..
+            } => CycleObtainStrategy::WithdrawFromCyclesLedger {
+                account_id: *HelperMapper::to_uuid(account_id)
+                    .expect("Invalid account id")
+                    .as_bytes(),
+            },
         }
     }
 }
@@ -1450,6 +1714,14 @@ impl From<CycleObtainStrategy> for station_api::CycleObtainStrategyDTO {
             CycleObtainStrategy::Disabled => station_api::CycleObtainStrategyDTO::Disabled,
             CycleObtainStrategy::MintFromNativeToken { account_id } => {
                 station_api::CycleObtainStrategyDTO::MintFromNativeToken {
+                    account_name: ACCOUNT_REPOSITORY
+                        .get(&AccountKey { id: account_id })
+                        .map(|a| a.name),
+                    account_id: Uuid::from_bytes(account_id).hyphenated().to_string(),
+                }
+            }
+            CycleObtainStrategy::WithdrawFromCyclesLedger { account_id } => {
+                station_api::CycleObtainStrategyDTO::WithdrawFromCyclesLedger {
                     account_name: ACCOUNT_REPOSITORY
                         .get(&AccountKey { id: account_id })
                         .map(|a| a.name),
@@ -1471,6 +1743,13 @@ impl From<station_api::CycleObtainStrategyInput> for CycleObtainStrategy {
                         .as_bytes(),
                 }
             }
+            station_api::CycleObtainStrategyInput::WithdrawFromCyclesLedger {
+                account_id, ..
+            } => CycleObtainStrategy::WithdrawFromCyclesLedger {
+                account_id: *HelperMapper::to_uuid(account_id)
+                    .expect("Invalid account id")
+                    .as_bytes(),
+            },
         }
     }
 }
@@ -1484,6 +1763,11 @@ impl From<CycleObtainStrategy> for station_api::CycleObtainStrategyInput {
                     account_id: Uuid::from_bytes(account_id).hyphenated().to_string(),
                 }
             }
+            CycleObtainStrategy::WithdrawFromCyclesLedger { account_id } => {
+                station_api::CycleObtainStrategyInput::WithdrawFromCyclesLedger {
+                    account_id: Uuid::from_bytes(account_id).hyphenated().to_string(),
+                }
+            }
         }
     }
 }
@@ -1493,6 +1777,8 @@ impl From<ManageSystemInfoOperationInput> for station_api::ManageSystemInfoOpera
         station_api::ManageSystemInfoOperationInput {
             name: input.name,
             cycle_obtain_strategy: input.cycle_obtain_strategy.map(|strategy| strategy.into()),
+            max_station_backup_snapshots: input.max_station_backup_snapshots,
+            max_upgrader_backup_snapshots: input.max_upgrader_backup_snapshots,
         }
     }
 }
@@ -1502,6 +1788,8 @@ impl From<station_api::ManageSystemInfoOperationInput> for ManageSystemInfoOpera
         ManageSystemInfoOperationInput {
             name: input.name,
             cycle_obtain_strategy: input.cycle_obtain_strategy.map(|strategy| strategy.into()),
+            max_station_backup_snapshots: input.max_station_backup_snapshots,
+            max_upgrader_backup_snapshots: input.max_upgrader_backup_snapshots,
         }
     }
 }
@@ -1518,6 +1806,202 @@ impl From<station_api::ManageSystemInfoOperationDTO> for ManageSystemInfoOperati
     fn from(operation: station_api::ManageSystemInfoOperationDTO) -> ManageSystemInfoOperation {
         ManageSystemInfoOperation {
             input: operation.input.into(),
+        }
+    }
+}
+
+impl AddAssetOperation {
+    pub fn to_dto(self, asset: Option<Asset>) -> station_api::AddAssetOperationDTO {
+        station_api::AddAssetOperationDTO {
+            asset: asset.map(|asset| asset.into()),
+            input: station_api::AddAssetOperationInput {
+                name: self.input.name,
+                blockchain: self.input.blockchain.to_string(),
+                standards: self.input.standards.iter().map(|s| s.to_string()).collect(),
+                symbol: self.input.symbol,
+                decimals: self.input.decimals,
+                metadata: self.input.metadata.into_vec_dto(),
+            },
+        }
+    }
+}
+
+impl From<station_api::AddAssetOperationInput> for AddAssetOperationInput {
+    fn from(input: station_api::AddAssetOperationInput) -> AddAssetOperationInput {
+        AddAssetOperationInput {
+            name: input.name,
+            symbol: input.symbol,
+            decimals: input.decimals,
+            metadata: input.metadata.into(),
+            blockchain: input.blockchain.parse().expect("Invalid blockchain"),
+            standards: input
+                .standards
+                .iter()
+                .map(|s| s.parse().expect("Invalid standard"))
+                .collect(),
+        }
+    }
+}
+
+impl From<EditAssetOperation> for station_api::EditAssetOperationDTO {
+    fn from(operation: EditAssetOperation) -> station_api::EditAssetOperationDTO {
+        station_api::EditAssetOperationDTO {
+            input: operation.input.into(),
+        }
+    }
+}
+
+impl From<EditAssetOperationInput> for station_api::EditAssetOperationInput {
+    fn from(input: EditAssetOperationInput) -> station_api::EditAssetOperationInput {
+        station_api::EditAssetOperationInput {
+            asset_id: Uuid::from_bytes(input.asset_id).hyphenated().to_string(),
+            name: input.name,
+            symbol: input.symbol,
+            change_metadata: input
+                .change_metadata
+                .map(|change_metadata| change_metadata.into()),
+            blockchain: input.blockchain.map(|blockchain| blockchain.to_string()),
+            standards: input
+                .standards
+                .map(|standards| standards.into_iter().map(|s| s.to_string()).collect()),
+        }
+    }
+}
+
+impl From<station_api::EditAssetOperationInput> for EditAssetOperationInput {
+    fn from(input: station_api::EditAssetOperationInput) -> EditAssetOperationInput {
+        EditAssetOperationInput {
+            asset_id: *HelperMapper::to_uuid(input.asset_id)
+                .expect("Invalid asset id")
+                .as_bytes(),
+            name: input.name,
+            symbol: input.symbol,
+            change_metadata: input
+                .change_metadata
+                .map(|change_metadata| change_metadata.into()),
+            blockchain: input.blockchain.map(|blockchain_dto| {
+                BlockchainMapper::to_blockchain(blockchain_dto).expect("Invalid blockchain")
+            }),
+            standards: input.standards.map(|standards| {
+                standards
+                    .into_iter()
+                    .map(|s| {
+                        BlockchainMapper::to_blockchain_standard(s)
+                            .expect("Invalid blockchain standard")
+                    })
+                    .collect()
+            }),
+        }
+    }
+}
+
+impl From<RemoveAssetOperation> for station_api::RemoveAssetOperationDTO {
+    fn from(operation: RemoveAssetOperation) -> station_api::RemoveAssetOperationDTO {
+        station_api::RemoveAssetOperationDTO {
+            input: operation.input.into(),
+        }
+    }
+}
+
+impl From<RemoveAssetOperationInput> for station_api::RemoveAssetOperationInput {
+    fn from(input: RemoveAssetOperationInput) -> station_api::RemoveAssetOperationInput {
+        station_api::RemoveAssetOperationInput {
+            asset_id: Uuid::from_bytes(input.asset_id).hyphenated().to_string(),
+        }
+    }
+}
+
+impl From<station_api::RemoveAssetOperationInput> for RemoveAssetOperationInput {
+    fn from(input: station_api::RemoveAssetOperationInput) -> RemoveAssetOperationInput {
+        RemoveAssetOperationInput {
+            asset_id: *HelperMapper::to_uuid(input.asset_id)
+                .expect("Invalid asset id")
+                .as_bytes(),
+        }
+    }
+}
+impl AddNamedRuleOperation {
+    pub fn to_dto(self, named_rule: Option<NamedRule>) -> station_api::AddNamedRuleOperationDTO {
+        station_api::AddNamedRuleOperationDTO {
+            named_rule: named_rule.map(|named_rule| named_rule.into()),
+            input: station_api::AddNamedRuleOperationInput {
+                name: self.input.name,
+                description: self.input.description,
+                rule: self.input.rule.into(),
+            },
+        }
+    }
+}
+
+impl From<station_api::AddNamedRuleOperationDTO> for AddNamedRuleOperation {
+    fn from(operation: station_api::AddNamedRuleOperationDTO) -> AddNamedRuleOperation {
+        AddNamedRuleOperation {
+            named_rule_id: operation.named_rule.map(|named_rule| {
+                *HelperMapper::to_uuid(named_rule.id)
+                    .expect("Invalid named rule id")
+                    .as_bytes()
+            }),
+            input: operation.input.into(),
+        }
+    }
+}
+
+impl From<station_api::AddNamedRuleOperationInput> for AddNamedRuleOperationInput {
+    fn from(input: station_api::AddNamedRuleOperationInput) -> AddNamedRuleOperationInput {
+        AddNamedRuleOperationInput {
+            name: input.name,
+            description: input.description,
+            rule: input.rule.into(),
+        }
+    }
+}
+
+impl From<EditNamedRuleOperation> for station_api::EditNamedRuleOperationDTO {
+    fn from(operation: EditNamedRuleOperation) -> station_api::EditNamedRuleOperationDTO {
+        station_api::EditNamedRuleOperationDTO {
+            input: station_api::EditNamedRuleOperationInput {
+                named_rule_id: Uuid::from_bytes(operation.input.named_rule_id)
+                    .hyphenated()
+                    .to_string(),
+                name: operation.input.name,
+                description: operation.input.description,
+                rule: operation.input.rule.map(|rule| rule.into()),
+            },
+        }
+    }
+}
+
+impl From<station_api::EditNamedRuleOperationInput> for EditNamedRuleOperationInput {
+    fn from(input: station_api::EditNamedRuleOperationInput) -> EditNamedRuleOperationInput {
+        EditNamedRuleOperationInput {
+            named_rule_id: *HelperMapper::to_uuid(input.named_rule_id)
+                .expect("Invalid named rule id")
+                .as_bytes(),
+            name: input.name,
+            description: input.description,
+            rule: input.rule.map(|rule| rule.into()),
+        }
+    }
+}
+
+impl From<RemoveNamedRuleOperation> for station_api::RemoveNamedRuleOperationDTO {
+    fn from(operation: RemoveNamedRuleOperation) -> station_api::RemoveNamedRuleOperationDTO {
+        station_api::RemoveNamedRuleOperationDTO {
+            input: station_api::RemoveNamedRuleOperationInput {
+                named_rule_id: Uuid::from_bytes(operation.input.named_rule_id)
+                    .hyphenated()
+                    .to_string(),
+            },
+        }
+    }
+}
+
+impl From<station_api::RemoveNamedRuleOperationInput> for RemoveNamedRuleOperationInput {
+    fn from(input: station_api::RemoveNamedRuleOperationInput) -> RemoveNamedRuleOperationInput {
+        RemoveNamedRuleOperationInput {
+            named_rule_id: *HelperMapper::to_uuid(input.named_rule_id)
+                .expect("Invalid named rule id")
+                .as_bytes(),
         }
     }
 }
@@ -1582,6 +2066,9 @@ impl From<RequestOperation> for RequestOperationDTO {
             RequestOperation::SystemUpgrade(operation) => {
                 RequestOperationDTO::SystemUpgrade(Box::new(operation.into()))
             }
+            RequestOperation::SystemRestore(operation) => {
+                RequestOperationDTO::SystemRestore(Box::new(operation.into()))
+            }
             RequestOperation::SetDisasterRecovery(operation) => {
                 RequestOperationDTO::SetDisasterRecovery(Box::new(operation.into()))
             }
@@ -1591,6 +2078,9 @@ impl From<RequestOperation> for RequestOperationDTO {
             RequestOperation::FundExternalCanister(operation) => {
                 RequestOperationDTO::FundExternalCanister(Box::new(operation.into()))
             }
+            RequestOperation::MonitorExternalCanister(operation) => {
+                RequestOperationDTO::MonitorExternalCanister(Box::new(operation.into()))
+            }
             RequestOperation::ConfigureExternalCanister(operation) => {
                 RequestOperationDTO::ConfigureExternalCanister(Box::new(operation.into()))
             }
@@ -1599,6 +2089,15 @@ impl From<RequestOperation> for RequestOperationDTO {
             }
             RequestOperation::CallExternalCanister(operation) => {
                 RequestOperationDTO::CallExternalCanister(Box::new(operation.into()))
+            }
+            RequestOperation::SnapshotExternalCanister(operation) => {
+                RequestOperationDTO::SnapshotExternalCanister(Box::new(operation.into()))
+            }
+            RequestOperation::RestoreExternalCanister(operation) => {
+                RequestOperationDTO::RestoreExternalCanister(Box::new(operation.into()))
+            }
+            RequestOperation::PruneExternalCanister(operation) => {
+                RequestOperationDTO::PruneExternalCanister(Box::new(operation.into()))
             }
             RequestOperation::EditPermission(operation) => {
                 RequestOperationDTO::EditPermission(Box::new(operation.into()))
@@ -1614,6 +2113,33 @@ impl From<RequestOperation> for RequestOperationDTO {
             }
             RequestOperation::ManageSystemInfo(operation) => {
                 RequestOperationDTO::ManageSystemInfo(Box::new(operation.into()))
+            }
+            RequestOperation::AddAsset(operation) => {
+                let asset = operation
+                    .asset_id
+                    .and_then(|id| AssetRepository::default().get(&id));
+
+                RequestOperationDTO::AddAsset(Box::new(operation.to_dto(asset)))
+            }
+            RequestOperation::EditAsset(operation) => {
+                RequestOperationDTO::EditAsset(Box::new(operation.into()))
+            }
+            RequestOperation::RemoveAsset(operation) => {
+                RequestOperationDTO::RemoveAsset(Box::new(operation.into()))
+            }
+
+            RequestOperation::AddNamedRule(operation) => {
+                let named_rule = operation
+                    .named_rule_id
+                    .and_then(|id| NamedRuleRepository::default().get(&NamedRuleKey { id }));
+
+                RequestOperationDTO::AddNamedRule(Box::new(operation.to_dto(named_rule)))
+            }
+            RequestOperation::EditNamedRule(operation) => {
+                RequestOperationDTO::EditNamedRule(Box::new(operation.into()))
+            }
+            RequestOperation::RemoveNamedRule(operation) => {
+                RequestOperationDTO::RemoveNamedRule(Box::new(operation.into()))
             }
         }
     }
@@ -1695,7 +2221,9 @@ impl RequestOperation {
                     Resource::UserGroup(ResourceAction::Delete(ResourceId::Any)),
                 ]
             }
-            RequestOperation::SetDisasterRecovery(_) | RequestOperation::SystemUpgrade(_) => {
+            RequestOperation::SetDisasterRecovery(_)
+            | RequestOperation::SystemUpgrade(_)
+            | RequestOperation::SystemRestore(_) => {
                 vec![Resource::System(SystemResourceAction::Upgrade)]
             }
             RequestOperation::ChangeExternalCanister(ChangeExternalCanisterOperation {
@@ -1725,6 +2253,19 @@ impl RequestOperation {
                 ]
             }
             RequestOperation::FundExternalCanister(FundExternalCanisterOperation {
+                canister_id,
+                ..
+            }) => {
+                vec![
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Fund(
+                        ExternalCanisterId::Any,
+                    )),
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Fund(
+                        ExternalCanisterId::Canister(*canister_id),
+                    )),
+                ]
+            }
+            RequestOperation::MonitorExternalCanister(MonitorExternalCanisterOperation {
                 canister_id,
                 ..
             }) => {
@@ -1776,6 +2317,45 @@ impl RequestOperation {
                     )),
                 ]
             }
+            RequestOperation::SnapshotExternalCanister(SnapshotExternalCanisterOperation {
+                input,
+                ..
+            }) => {
+                vec![
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                        ExternalCanisterId::Any,
+                    )),
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                        ExternalCanisterId::Canister(input.canister_id),
+                    )),
+                ]
+            }
+            RequestOperation::RestoreExternalCanister(RestoreExternalCanisterOperation {
+                input,
+                ..
+            }) => {
+                vec![
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                        ExternalCanisterId::Any,
+                    )),
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                        ExternalCanisterId::Canister(input.canister_id),
+                    )),
+                ]
+            }
+            RequestOperation::PruneExternalCanister(PruneExternalCanisterOperation {
+                input,
+                ..
+            }) => {
+                vec![
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                        ExternalCanisterId::Any,
+                    )),
+                    Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                        ExternalCanisterId::Canister(input.canister_id),
+                    )),
+                ]
+            }
             RequestOperation::EditRequestPolicy(EditRequestPolicyOperation { input }) => {
                 vec![
                     Resource::RequestPolicy(ResourceAction::Update(ResourceId::Id(
@@ -1794,6 +2374,41 @@ impl RequestOperation {
             }
             RequestOperation::ManageSystemInfo(_) => {
                 vec![Resource::System(SystemResourceAction::ManageSystemInfo)]
+            }
+            RequestOperation::AddAsset(_) => {
+                vec![Resource::Asset(ResourceAction::Create)]
+            }
+            RequestOperation::EditAsset(EditAssetOperation { input }) => {
+                vec![
+                    Resource::Asset(ResourceAction::Update(ResourceId::Id(input.asset_id))),
+                    Resource::Asset(ResourceAction::Update(ResourceId::Any)),
+                ]
+            }
+            RequestOperation::RemoveAsset(RemoveAssetOperation { input }) => {
+                vec![
+                    Resource::Asset(ResourceAction::Delete(ResourceId::Id(input.asset_id))),
+                    Resource::Asset(ResourceAction::Delete(ResourceId::Any)),
+                ]
+            }
+
+            RequestOperation::AddNamedRule(_) => {
+                vec![Resource::NamedRule(ResourceAction::Create)]
+            }
+            RequestOperation::EditNamedRule(EditNamedRuleOperation { input }) => {
+                vec![
+                    Resource::NamedRule(ResourceAction::Update(ResourceId::Id(
+                        input.named_rule_id,
+                    ))),
+                    Resource::NamedRule(ResourceAction::Update(ResourceId::Any)),
+                ]
+            }
+            RequestOperation::RemoveNamedRule(RemoveNamedRuleOperation { input }) => {
+                vec![
+                    Resource::NamedRule(ResourceAction::Delete(ResourceId::Id(
+                        input.named_rule_id,
+                    ))),
+                    Resource::NamedRule(ResourceAction::Delete(ResourceId::Any)),
+                ]
             }
         }
     }

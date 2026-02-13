@@ -1,20 +1,21 @@
 # Define the BUILD_MODE argument with a default value of "production"
 ARG BUILD_MODE=production
+ARG TARGETPLATFORM=linux/amd64
 
 # Operating system with basic tools
-FROM --platform=linux/amd64 ubuntu@sha256:bbf3d1baa208b7649d1d0264ef7d522e1dc0deeeaaf6085bf8e4618867f03494 as base
+FROM ubuntu:24.04 AS base
 SHELL ["bash", "-c"]
 ENV TZ=UTC
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone && \
-    apt -yq update && \
-    apt -yqq install --no-install-recommends curl ca-certificates \
+    apt -yq -o Acquire::http::Pipeline-Depth=0 -o Acquire::Retries=3 update && \
+    apt -yqq -o Acquire::http::Pipeline-Depth=0 -o Acquire::Retries=3 install --no-install-recommends curl ca-certificates \
         build-essential pkg-config libssl-dev llvm-dev liblmdb-dev clang cmake \
         git jq npm xxd file curl unzip
 
 # Code specific dependencies
-FROM base as builder
+FROM base AS builder
 SHELL ["bash", "-c"]
 WORKDIR /code
 ARG BUILD_MODE
@@ -27,8 +28,8 @@ ENV PATH=$CARGO_HOME/bin:$PATH
 ENV PATH=$FNM_DIR/bin:$PATH
 # Install Rust and the Node.js version manager
 COPY rust-toolchain.toml .
-RUN curl -fsSL https://sh.rustup.rs -sSf | sh -s -- -y --no-modify-path && \
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir $FNM_DIR/bin --skip-shell
+RUN curl -O https://static.rust-lang.org/rustup/archive/1.27.1/x86_64-unknown-linux-gnu/rustup-init && chmod +x rustup-init && ./rustup-init -y
+RUN curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir $FNM_DIR/bin --skip-shell
 # Add the fnm env var envaluation to the bashrc to enable it in bash by default
 RUN echo "eval \"$(fnm env)\"" >> $HOME/.bashrc
 # Add expected node version file and root package.json with expected pnpm version
@@ -38,16 +39,17 @@ COPY package.json .
 RUN eval "$(fnm env)" && \
     fnm install && \
     fnm use && \
+    npm install -g corepack@0.31.0 && \
     corepack enable && \
     fnm alias default production
 # Install the monorepo dependencies
 COPY . .
 RUN eval "$(fnm env)" && \
-    fnm use && \ 
+    fnm use && \
     pnpm install --frozen-lockfile
 
 # Build the Orbit Upgrader Canister
-FROM builder as build_upgrader
+FROM builder AS build_upgrader
 SHELL ["bash", "-c"]
 WORKDIR /code
 LABEL io.icp.artifactType="canister" \
@@ -57,7 +59,7 @@ RUN eval "$(fnm env)" && \
     npx nx run upgrader:create-artifacts
 
 # Build the Orbit Station Canister
-FROM builder as build_station
+FROM builder AS build_station
 SHELL ["bash", "-c"]
 WORKDIR /code
 LABEL io.icp.artifactType="canister" \
@@ -67,7 +69,7 @@ RUN eval "$(fnm env)" && \
     npx nx run station:create-artifacts
 
 # Build the Orbit Control Panel
-FROM builder as build_control_panel
+FROM builder AS build_control_panel
 SHELL ["bash", "-c"]
 WORKDIR /code
 LABEL io.icp.artifactType="canister" \
@@ -77,7 +79,7 @@ RUN eval "$(fnm env)" && \
     npx nx run control-panel:create-artifacts
 
 # Build the Orbit Wallet Frontend Assets
-FROM builder as build_wallet_dapp
+FROM builder AS build_wallet_dapp
 SHELL ["bash", "-c"]
 WORKDIR /code
 LABEL io.icp.artifactType="canister" \
@@ -85,3 +87,24 @@ LABEL io.icp.artifactType="canister" \
 RUN eval "$(fnm env)" && \
     fnm use && \
     npx nx run wallet-dapp:create-artifacts
+
+# Build the Orbit Wallet Frontend Assets
+FROM builder AS build_marketing_dapp
+SHELL ["bash", "-c"]
+WORKDIR /code
+LABEL io.icp.artifactType="canister" \
+      io.icp.artifactName="marketing-dapp"
+RUN eval "$(fnm env)" && \
+    fnm use && \
+    npx nx run marketing-dapp:create-artifacts
+
+# Build the Orbit Docs Frontend Assets
+FROM builder AS build_docs_portal
+SHELL ["bash", "-c"]
+WORKDIR /code
+LABEL io.icp.artifactType="canister" \
+      io.icp.artifactName="docs-portal"
+RUN eval "$(fnm env)" && \
+    fnm use && \
+    npx nx show projects && \
+    npx nx run docs-portal:create-artifacts

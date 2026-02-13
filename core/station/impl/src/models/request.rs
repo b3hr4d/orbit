@@ -1,7 +1,7 @@
-use super::request_policy_rule::{RequestEvaluationResult, RequestPolicyRuleInput};
+use super::request_policy_rule::RequestEvaluationResult;
 use super::{
-    ConfigureExternalCanisterOperationKind, DisplayUser, EvaluationStatus, RequestApproval,
-    RequestApprovalStatus, RequestOperation, RequestStatus, UserId, UserKey,
+    DisplayUser, EvaluationStatus, RequestApproval, RequestApprovalStatus, RequestOperation,
+    RequestStatus, UserId, UserKey,
 };
 use crate::core::evaluation::{
     Evaluate, REQUEST_APPROVE_RIGHTS_REQUEST_POLICY_RULE_EVALUATOR, REQUEST_POLICY_RULE_EVALUATOR,
@@ -12,15 +12,10 @@ use crate::core::ic_cdk::next_time;
 use crate::core::request::{
     RequestApprovalRightsEvaluator, RequestEvaluator, RequestPossibleApproversFinder,
 };
-use crate::core::validation::{
-    EnsureAccount, EnsureAddressBookEntry, EnsureIdExists, EnsureRequestPolicy, EnsureUser,
-    EnsureUserGroup,
-};
-use crate::errors::{EvaluateError, RequestError, ValidationError};
-use crate::models::resource::{ExecutionMethodResourceTarget, ValidationMethodResourceTarget};
-use crate::repositories::USER_REPOSITORY;
+use crate::errors::{EvaluateError, RequestError};
+use crate::repositories::{REQUEST_REPOSITORY, USER_REPOSITORY};
 use candid::{CandidType, Deserialize};
-use orbit_essentials::model::{ContextualModel, ModelKey};
+use orbit_essentials::model::ModelKey;
 use orbit_essentials::repository::Repository;
 use orbit_essentials::storable;
 use orbit_essentials::{
@@ -65,6 +60,11 @@ pub struct Request {
     pub created_timestamp: Timestamp,
     /// The last time the record was updated or created.
     pub last_modification_timestamp: Timestamp,
+    /// The deduplication key of the request.
+    pub deduplication_key: Option<String>,
+    /// The tags of the request.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[storable]
@@ -122,6 +122,161 @@ fn validate_summary(summary: &Option<String>) -> ModelValidatorResult<RequestErr
     Ok(())
 }
 
+fn validate_expiration_dt(expiration_dt: &Timestamp) -> ModelValidatorResult<RequestError> {
+    if *expiration_dt <= next_time() {
+        return Err(RequestError::ValidationError {
+            info: "The expiration date must be in the future".to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_tags(tags: &[String]) -> ModelValidatorResult<RequestError> {
+    if tags.is_empty() {
+        return Ok(());
+    }
+
+    if tags.len() > Request::MAX_TAGS_LEN as usize {
+        return Err(RequestError::ValidationError {
+            info: format!(
+                "The number of tags exceeds the maximum allowed: {}",
+                Request::MAX_TAGS_LEN
+            ),
+        });
+    }
+
+    if tags
+        .iter()
+        .any(|tag| tag.len() > Request::MAX_TAG_LEN as usize)
+    {
+        return Err(RequestError::ValidationError {
+            info: format!(
+                "The tag length exceeds the maximum allowed: {}",
+                Request::MAX_TAG_LEN
+            ),
+        });
+    }
+
+    let mut unique_tags = HashSet::new();
+    for tag in tags {
+        if !unique_tags.insert(tag.as_str()) {
+            return Err(RequestError::ValidationError {
+                info: "The tags must be unique".to_owned(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_status(status: &RequestStatus) -> ModelValidatorResult<RequestError> {
+    match status {
+        RequestStatus::Cancelled {
+            reason: Some(reason),
+        } => {
+            if reason.trim().is_empty() {
+                return Err(RequestError::ValidationError {
+                    info: "The reason for the cancellation must not be empty".to_owned(),
+                });
+            }
+
+            if reason.len() > Request::MAX_CANCEL_REASON_LEN as usize {
+                return Err(RequestError::ValidationError {
+                    info: format!(
+                        "The reason for the cancellation exceeds the maximum allowed: {}",
+                        Request::MAX_CANCEL_REASON_LEN
+                    ),
+                });
+            }
+
+            Ok(())
+        }
+        RequestStatus::Created
+        | RequestStatus::Rejected
+        | RequestStatus::Approved
+        | RequestStatus::Completed { .. }
+        | RequestStatus::Failed { .. }
+        | RequestStatus::Scheduled { .. }
+        | RequestStatus::Processing { .. }
+        | RequestStatus::Cancelled { reason: None } => Ok(()),
+    }
+}
+
+fn validate_execution_plan(
+    execution_plan: &RequestExecutionPlan,
+) -> ModelValidatorResult<RequestError> {
+    match execution_plan {
+        RequestExecutionPlan::Scheduled { execution_time } => {
+            if *execution_time <= next_time() {
+                return Err(RequestError::ValidationError {
+                    info: "The execution time must be in the future".to_owned(),
+                });
+            }
+        }
+        RequestExecutionPlan::Immediate => (),
+    }
+
+    Ok(())
+}
+
+fn validate_deduplication_key(
+    deduplication_key: &Option<String>,
+    status: &RequestStatus,
+) -> ModelValidatorResult<RequestError> {
+    // Only check for duplicates when a request is created
+    let should_be_checked_for_duplicates = match status {
+        RequestStatus::Created => true,
+        RequestStatus::Approved
+        | RequestStatus::Rejected
+        | RequestStatus::Scheduled { .. }
+        | RequestStatus::Cancelled { .. }
+        | RequestStatus::Processing { .. }
+        | RequestStatus::Completed { .. }
+        | RequestStatus::Failed { .. } => false,
+    };
+
+    if let Some(deduplication_key) = deduplication_key {
+        if deduplication_key.len() > Request::MAX_DEDUPLICATION_KEY_LEN as usize {
+            return Err(RequestError::ValidationError {
+                info: format!(
+                    "The deduplication key length exceeds the maximum allowed: {}",
+                    Request::MAX_DEDUPLICATION_KEY_LEN
+                ),
+            });
+        }
+
+        if !should_be_checked_for_duplicates {
+            return Ok(());
+        }
+
+        if deduplication_key.trim().is_empty() {
+            return Err(RequestError::ValidationError {
+                info: "The deduplication key must not be empty".to_owned(),
+            });
+        }
+        let is_not_unique = REQUEST_REPOSITORY
+            .find_by_deduplication_key(deduplication_key.clone())
+            .iter()
+            .any(|request| {
+                matches!(
+                    request.status,
+                    RequestStatus::Created
+                        | RequestStatus::Scheduled { .. }
+                        | RequestStatus::Processing { .. }
+                        | RequestStatus::Approved
+                )
+            });
+        if is_not_unique {
+            return Err(RequestError::ValidationError {
+                info: "A request with the same deduplication key already exists".to_owned(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_requested_by(requested_by: &UserId) -> ModelValidatorResult<RequestError> {
     USER_REPOSITORY
         .get(&UserKey { id: *requested_by })
@@ -131,144 +286,32 @@ fn validate_requested_by(requested_by: &UserId) -> ModelValidatorResult<RequestE
     Ok(())
 }
 
-fn validate_request_operation_foreign_keys(
-    operation: &RequestOperation,
-) -> ModelValidatorResult<ValidationError> {
-    match operation {
-        RequestOperation::ManageSystemInfo(_) => (),
-        RequestOperation::Transfer(op) => {
-            EnsureAccount::id_exists(&op.input.from_account_id)?;
-        }
-        RequestOperation::AddAccount(op) => {
-            op.input.read_permission.validate()?;
-            op.input.configs_permission.validate()?;
-            op.input.transfer_permission.validate()?;
-
-            if let Some(policy_rule) = &op.input.transfer_request_policy {
-                policy_rule.validate()?;
-            }
-
-            if let Some(policy_rule) = &op.input.configs_request_policy {
-                policy_rule.validate()?;
-            }
-        }
-        RequestOperation::EditAccount(op) => {
-            EnsureAccount::id_exists(&op.input.account_id)?;
-
-            if let Some(allow) = &op.input.read_permission {
-                allow.validate()?;
-            }
-
-            if let Some(allow) = &op.input.configs_permission {
-                allow.validate()?;
-            }
-
-            if let Some(allow) = &op.input.transfer_permission {
-                allow.validate()?;
-            }
-
-            if let Some(RequestPolicyRuleInput::Set(criteria)) = &op.input.configs_request_policy {
-                criteria.validate()?;
-            }
-
-            if let Some(RequestPolicyRuleInput::Set(policy_rule)) =
-                &op.input.transfer_request_policy
-            {
-                policy_rule.validate()?;
-            }
-        }
-        RequestOperation::AddAddressBookEntry(_) => (),
-        RequestOperation::EditAddressBookEntry(op) => {
-            EnsureAddressBookEntry::id_exists(&op.input.address_book_entry_id)?;
-        }
-        RequestOperation::RemoveAddressBookEntry(op) => {
-            EnsureAddressBookEntry::id_exists(&op.input.address_book_entry_id)?;
-        }
-        RequestOperation::AddUser(op) => {
-            EnsureUserGroup::id_list_exists(&op.input.groups)?;
-        }
-        RequestOperation::EditUser(op) => {
-            EnsureUser::id_exists(&op.input.user_id)?;
-
-            if let Some(group_ids) = &op.input.groups {
-                EnsureUserGroup::id_list_exists(group_ids)?;
-            }
-        }
-        RequestOperation::EditPermission(op) => {
-            op.input.resource.validate()?;
-
-            if let Some(user_ids) = &op.input.users {
-                EnsureUser::id_list_exists(user_ids)?;
-            }
-
-            if let Some(group_ids) = &op.input.user_groups {
-                EnsureUserGroup::id_list_exists(group_ids)?;
-            }
-        }
-        RequestOperation::AddUserGroup(_) => (),
-        RequestOperation::EditUserGroup(op) => {
-            EnsureUserGroup::id_exists(&op.input.user_group_id)?;
-        }
-        RequestOperation::RemoveUserGroup(ok) => {
-            EnsureUserGroup::id_exists(&ok.input.user_group_id)?;
-        }
-        RequestOperation::SystemUpgrade(_) => (),
-        RequestOperation::ChangeExternalCanister(_) => (),
-        RequestOperation::ConfigureExternalCanister(op) => {
-            let canister_id = op.canister_id;
-            if let ConfigureExternalCanisterOperationKind::Settings(settings) = &op.kind {
-                if let Some(updated_request_policies) = &settings.request_policies {
-                    ContextualModel::new(updated_request_policies.clone(), canister_id)
-                        .validate()?;
-                }
-            }
-        }
-        RequestOperation::FundExternalCanister(_) => (),
-        RequestOperation::CreateExternalCanister(op) => {
-            op.input.validate()?;
-        }
-        RequestOperation::CallExternalCanister(op) => {
-            let validation_method_target: ValidationMethodResourceTarget =
-                op.input.validation_method.clone().into();
-            validation_method_target.validate()?;
-            let execution_method_target: ExecutionMethodResourceTarget =
-                op.input.execution_method.clone().into();
-            execution_method_target.validate()?;
-        }
-        RequestOperation::AddRequestPolicy(op) => {
-            op.input.specifier.validate()?;
-            op.input.rule.validate()?;
-        }
-        RequestOperation::EditRequestPolicy(op) => {
-            EnsureRequestPolicy::id_exists(&op.input.policy_id)?;
-
-            if let Some(specifier) = &op.input.specifier {
-                specifier.validate()?;
-            }
-
-            if let Some(policy_rule) = &op.input.rule {
-                policy_rule.validate()?;
-            }
-        }
-        RequestOperation::RemoveRequestPolicy(op) => {
-            EnsureRequestPolicy::id_exists(&op.input.policy_id)?;
-        }
-        RequestOperation::SetDisasterRecovery(op) => {
-            if let Some(committee) = &op.input.committee {
-                EnsureUserGroup::id_exists(&committee.user_group_id)?;
-            }
-        }
-    }
-    Ok(())
-}
-
 impl ModelValidator<RequestError> for Request {
     fn validate(&self) -> ModelValidatorResult<RequestError> {
         validate_title(&self.title)?;
         validate_summary(&self.summary)?;
         validate_requested_by(&self.requested_by)?;
 
-        validate_request_operation_foreign_keys(&self.operation)?;
+        let must_not_be_expired = match self.status {
+            RequestStatus::Created => true,
+            RequestStatus::Approved
+            | RequestStatus::Rejected
+            | RequestStatus::Scheduled { .. }
+            | RequestStatus::Cancelled { .. }
+            | RequestStatus::Processing { .. }
+            | RequestStatus::Completed { .. }
+            | RequestStatus::Failed { .. } => false,
+        };
+        if must_not_be_expired {
+            validate_expiration_dt(&self.expiration_dt)?;
+            validate_execution_plan(&self.execution_plan)?;
+        }
+
+        validate_status(&self.status)?;
+        self.operation.validate()?;
+
+        validate_deduplication_key(&self.deduplication_key, &self.status)?;
+        validate_tags(&self.tags)?;
 
         Ok(())
     }
@@ -276,7 +319,11 @@ impl ModelValidator<RequestError> for Request {
 
 impl Request {
     pub const MAX_TITLE_LEN: u8 = 255;
+    pub const MAX_CANCEL_REASON_LEN: u16 = 1000;
     pub const MAX_SUMMARY_LEN: u16 = 1000;
+    pub const MAX_DEDUPLICATION_KEY_LEN: u8 = 64;
+    pub const MAX_TAGS_LEN: u8 = 10;
+    pub const MAX_TAG_LEN: u8 = 64;
 
     /// Creates a new request key from the given key components.
     pub fn key(request_id: RequestId) -> RequestKey {
@@ -420,16 +467,67 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::validation::disable_mock_resource_validation;
-    use crate::models::permission::Allow;
-    use crate::models::{
-        AddAccountOperationInput, AddUserOperation, AddUserOperationInput, Metadata,
-        TransferOperation, TransferOperationInput,
-    };
-    use crate::services::AccountService;
-
     use super::request_test_utils::mock_request;
     use super::*;
+
+    #[test]
+    fn fail_request_cancel_reason_too_big() {
+        let mut request = mock_request();
+        request.status = RequestStatus::Cancelled {
+            reason: Some("a".repeat(Request::MAX_CANCEL_REASON_LEN as usize + 1)),
+        };
+
+        let result = validate_status(&request.status);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: format!(
+                    "The reason for the cancellation exceeds the maximum allowed: {}",
+                    Request::MAX_CANCEL_REASON_LEN
+                )
+            }
+        )
+    }
+
+    #[test]
+    fn fail_request_cancel_reason_empty() {
+        let mut request = mock_request();
+        request.status = RequestStatus::Cancelled {
+            reason: Some("".to_owned()),
+        };
+
+        let result = validate_status(&request.status);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: "The reason for the cancellation must not be empty".to_owned()
+            }
+        );
+
+        request.status = RequestStatus::Cancelled {
+            reason: Some(" ".to_owned()),
+        };
+
+        let result = validate_status(&request.status);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_request_cancel_reason_is_valid() {
+        let mut request = mock_request();
+        request.status = RequestStatus::Cancelled {
+            reason: Some("a".repeat(Request::MAX_CANCEL_REASON_LEN as usize)),
+        };
+
+        let result = validate_status(&request.status);
+
+        assert!(result.is_ok());
+    }
 
     #[test]
     fn fail_request_title_too_big() {
@@ -439,6 +537,67 @@ mod tests {
         let result = validate_title(&request.title);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn fail_request_expiration_dt_in_past() {
+        let mut request = mock_request();
+        request.expiration_dt = 0;
+
+        let result = validate_expiration_dt(&request.expiration_dt);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: "The expiration date must be in the future".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn test_request_expiration_dt_is_valid() {
+        let mut request = mock_request();
+        request.expiration_dt = Request::default_expiration_dt_ns();
+
+        let result = validate_expiration_dt(&request.expiration_dt);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn fail_request_execution_plan_in_past() {
+        let mut request = mock_request();
+        request.execution_plan = RequestExecutionPlan::Scheduled { execution_time: 0 };
+
+        let result = validate_execution_plan(&request.execution_plan);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: "The execution time must be in the future".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn test_request_execution_plan_is_valid() {
+        let mut request = mock_request();
+        request.execution_plan = RequestExecutionPlan::Scheduled {
+            execution_time: Request::default_expiration_dt_ns(),
+        };
+
+        let result = validate_execution_plan(&request.execution_plan);
+
+        assert!(result.is_ok());
+
+        let mut request = mock_request();
+        request.execution_plan = RequestExecutionPlan::Immediate;
+
+        let result = validate_execution_plan(&request.execution_plan);
+
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -471,213 +630,182 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_request_operation_is_valid() {
-        disable_mock_resource_validation();
-
-        let account_service = AccountService::default();
-        let account = account_service
-            .create_account(
-                AddAccountOperationInput {
-                    name: "a".to_owned(),
-                    blockchain: crate::models::Blockchain::InternetComputer,
-                    standard: crate::models::BlockchainStandard::Native,
-                    metadata: Metadata::default(),
-                    read_permission: Allow::default(),
-                    configs_permission: Allow::default(),
-                    transfer_permission: Allow::default(),
-                    configs_request_policy: None,
-                    transfer_request_policy: None,
-                },
-                None,
-            )
-            .await
-            .expect("Failed to create account");
-
-        let operation = RequestOperation::Transfer(TransferOperation {
-            transfer_id: None,
-            fee: None,
-
-            input: TransferOperationInput {
-                network: "mainnet".to_string(),
-                amount: 1u64.into(),
-                fee: None,
-                metadata: Metadata::default(),
-                to: "0x1234".to_string(),
-                from_account_id: account.id,
-            },
-        });
-
-        let result = validate_request_operation_foreign_keys(&operation);
+    #[test]
+    fn test_request_deduplication_key_is_valid() {
+        let mut request = mock_request();
+        request.status = RequestStatus::Created;
+        request.deduplication_key = Some("a".to_string());
+        let result = validate_deduplication_key(&request.deduplication_key, &request.status);
 
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn fail_request_operation_with_invalid_id() {
-        disable_mock_resource_validation();
+    #[test]
+    fn fail_request_deduplication_key_is_empty() {
+        let mut request = mock_request();
+        request.status = RequestStatus::Created;
+        request.deduplication_key = Some("".to_string());
+        let result = validate_deduplication_key(&request.deduplication_key, &request.status);
 
-        validate_request_operation_foreign_keys(&RequestOperation::Transfer(TransferOperation {
-            transfer_id: None,
-            fee: None,
-            input: TransferOperationInput {
-                network: "mainnet".to_string(),
-                amount: 1u64.into(),
-                fee: None,
-                metadata: Metadata::default(),
-                to: "0x1234".to_string(),
-                from_account_id: [0; 16],
-            },
-        }))
-        .expect_err("Invalid account id should fail");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: "The deduplication key must not be empty".to_owned()
+            }
+        );
+    }
 
-        validate_request_operation_foreign_keys(&RequestOperation::AddUser(AddUserOperation {
-            user_id: None,
-            input: AddUserOperationInput {
-                name: "user-1".to_string(),
-                identities: vec![],
-                groups: vec![[1; 16]],
-                status: crate::models::UserStatus::Active,
-            },
-        }))
-        .expect_err("Invalid user group id should fail");
+    #[test]
+    fn test_request_deduplication_key_is_unique() {
+        let mut request = mock_request();
+        request.status = RequestStatus::Created;
+        request.deduplication_key = Some("a".to_string());
+        REQUEST_REPOSITORY.insert(request.to_key(), request.clone());
+        let mut request = mock_request();
+        request.status = RequestStatus::Created;
+        request.deduplication_key = Some("b".to_string());
+        let result = validate_deduplication_key(&request.deduplication_key, &request.status);
 
-        validate_request_operation_foreign_keys(&RequestOperation::EditUserGroup(
-            crate::models::EditUserGroupOperation {
-                input: crate::models::EditUserGroupOperationInput {
-                    user_group_id: [0; 16],
-                    name: "a".to_owned(),
-                },
-            },
-        ))
-        .expect_err("Invalid user group id should fail");
-        validate_request_operation_foreign_keys(&RequestOperation::RemoveUserGroup(
-            crate::models::RemoveUserGroupOperation {
-                input: crate::models::RemoveUserGroupOperationInput {
-                    user_group_id: [0; 16],
-                },
-            },
-        ))
-        .expect_err("Invalid user group id should fail");
+        assert!(result.is_ok());
+    }
 
-        validate_request_operation_foreign_keys(&RequestOperation::AddRequestPolicy(
-            crate::models::AddRequestPolicyOperation {
-                policy_id: None,
-                input: crate::models::AddRequestPolicyOperationInput {
-                    specifier: crate::models::request_specifier::RequestSpecifier::EditUser(
-                        crate::models::resource::ResourceIds::Ids(vec![[1; 16]]),
-                    ),
-                    rule: crate::models::request_policy_rule::RequestPolicyRule::AutoApproved,
-                },
-            },
-        ))
-        .expect_err("Invalid request specifier should fail");
+    #[test]
+    fn test_request_deduplication_key_can_be_reused_after_request_is_not_pending() {
+        let duplicatable_statuses = [
+            RequestStatus::Rejected,
+            RequestStatus::Cancelled { reason: None },
+            RequestStatus::Completed { completed_at: 0 },
+            RequestStatus::Failed { reason: None },
+        ];
+        for (i, initial_status) in duplicatable_statuses.iter().enumerate() {
+            let key = format!("{i}");
+            let mut request = mock_request();
+            request.status = initial_status.clone();
+            request.deduplication_key = Some(key.clone());
+            REQUEST_REPOSITORY.insert(request.to_key(), request.clone());
+            let mut request = mock_request();
+            request.status = RequestStatus::Created;
+            request.deduplication_key = Some(key);
+            let result = validate_deduplication_key(&request.deduplication_key, &request.status);
 
-        validate_request_operation_foreign_keys(&RequestOperation::EditRequestPolicy(
-            crate::models::EditRequestPolicyOperation {
-                input: crate::models::EditRequestPolicyOperationInput {
-                    policy_id: [0; 16],
-                    specifier: None,
-                    rule: None,
-                },
-            },
-        ))
-        .expect_err("Invalid request policy id should fail");
+            assert!(result.is_ok());
+        }
+    }
 
-        validate_request_operation_foreign_keys(&RequestOperation::RemoveRequestPolicy(
-            crate::models::RemoveRequestPolicyOperation {
-                input: crate::models::RemoveRequestPolicyOperationInput { policy_id: [0; 16] },
-            },
-        ))
-        .expect_err("Invalid request policy id should fail");
+    #[test]
+    fn fail_request_deduplication_key_is_not_unique() {
+        let validated_statuses = [
+            RequestStatus::Created,
+            RequestStatus::Approved,
+            RequestStatus::Scheduled { scheduled_at: 0 },
+            RequestStatus::Processing { started_at: 0 },
+        ];
+        for (i, initial_status) in validated_statuses.iter().enumerate() {
+            let key = format!("{i}");
+            let mut request = mock_request();
+            request.status = initial_status.clone();
+            request.deduplication_key = Some(key.clone());
+            REQUEST_REPOSITORY.insert(request.to_key(), request.clone());
+            let mut request = mock_request();
+            request.status = RequestStatus::Created;
+            request.deduplication_key = Some(key);
+            let result = validate_deduplication_key(&request.deduplication_key, &request.status);
 
-        validate_request_operation_foreign_keys(&RequestOperation::AddAccount(
-            crate::models::AddAccountOperation {
-                account_id: None,
-                input: crate::models::AddAccountOperationInput {
-                    name: "a".to_owned(),
-                    blockchain: crate::models::Blockchain::InternetComputer,
-                    standard: crate::models::BlockchainStandard::Native,
-                    metadata: Metadata::default(),
-                    read_permission: Allow {
-                        auth_scope: crate::models::permission::AuthScope::Restricted,
-                        users: vec![[1; 16]],
-                        user_groups: vec![],
-                    },
-                    configs_permission: Allow::default(),
-                    transfer_permission: Allow::default(),
-                    configs_request_policy: None,
-                    transfer_request_policy: None,
-                },
-            },
-        ))
-        .expect_err("Invalid user id should fail");
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                RequestError::ValidationError {
+                    info: "A request with the same deduplication key already exists".to_owned()
+                }
+            );
+        }
+    }
 
-        validate_request_operation_foreign_keys(&RequestOperation::EditAccount(
-            crate::models::EditAccountOperation {
-                input: crate::models::EditAccountOperationInput {
-                    account_id: [0; 16],
-                    read_permission: None,
-                    configs_permission: None,
-                    transfer_permission: None,
-                    configs_request_policy: None,
-                    transfer_request_policy: None,
-                    name: None,
-                },
-            },
-        ))
-        .expect_err("Invalid account id should fail");
+    #[test]
+    fn fail_request_deduplication_key_is_too_long() {
+        let mut request = mock_request();
+        request.status = RequestStatus::Created;
+        request.deduplication_key =
+            Some("a".repeat(Request::MAX_DEDUPLICATION_KEY_LEN as usize + 1));
+        let result = validate_deduplication_key(&request.deduplication_key, &request.status);
+        assert!(result.is_err());
+    }
 
-        validate_request_operation_foreign_keys(&RequestOperation::EditAddressBookEntry(
-            crate::models::EditAddressBookEntryOperation {
-                input: crate::models::EditAddressBookEntryOperationInput {
-                    address_book_entry_id: [0; 16],
-                    address_owner: None,
-                    change_metadata: None,
-                    labels: None,
-                },
-            },
-        ))
-        .expect_err("Invalid address book entry id should fail");
+    #[test]
+    fn fail_request_tags_too_many() {
+        let mut request = mock_request();
+        for i in 0..Request::MAX_TAGS_LEN as usize + 1 {
+            request.tags.push(format!("tag{}", i));
+        }
 
-        validate_request_operation_foreign_keys(&RequestOperation::RemoveAddressBookEntry(
-            crate::models::RemoveAddressBookEntryOperation {
-                input: crate::models::RemoveAddressBookEntryOperationInput {
-                    address_book_entry_id: [0; 16],
-                },
-            },
-        ))
-        .expect_err("Invalid address book entry id should fail");
+        let result = validate_tags(&request.tags);
 
-        validate_request_operation_foreign_keys(&RequestOperation::EditUser(
-            crate::models::EditUserOperation {
-                input: crate::models::EditUserOperationInput {
-                    user_id: [0; 16],
-                    groups: None,
-                    name: None,
-                    identities: None,
-                    status: None,
-                    cancel_pending_requests: None,
-                },
-            },
-        ))
-        .expect_err("Invalid user id should fail");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: format!(
+                    "The number of tags exceeds the maximum allowed: {}",
+                    Request::MAX_TAGS_LEN
+                ),
+            }
+        );
+    }
 
-        validate_request_operation_foreign_keys(&RequestOperation::EditPermission(
-            crate::models::EditPermissionOperation {
-                input: crate::models::EditPermissionOperationInput {
-                    resource: crate::models::resource::Resource::Account(
-                        crate::models::resource::AccountResourceAction::Read(
-                            crate::models::resource::ResourceId::Id([0; 16]),
-                        ),
-                    ),
-                    users: None,
-                    user_groups: None,
-                    auth_scope: None,
-                },
-            },
-        ))
-        .expect_err("Invalid resource id should fail");
+    #[test]
+    fn fail_request_tag_too_long() {
+        let mut request = mock_request();
+        request.tags = vec!["a".repeat(Request::MAX_TAG_LEN as usize + 1)];
+
+        let result = validate_tags(&request.tags);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: format!(
+                    "The tag length exceeds the maximum allowed: {}",
+                    Request::MAX_TAG_LEN
+                ),
+            }
+        );
+    }
+
+    #[test]
+    fn fail_request_tags_not_unique() {
+        let mut request = mock_request();
+        request.tags = vec!["tag1".to_string(), "tag1".to_string()];
+
+        let result = validate_tags(&request.tags);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::ValidationError {
+                info: "The tags must be unique".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_request_tags_is_valid() {
+        let mut request = mock_request();
+        request.tags = vec!["tag1".to_string(), "tag2".to_string()];
+
+        let result = validate_tags(&request.tags);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_request_tags_is_empty() {
+        let mut request = mock_request();
+        request.tags = vec![];
+
+        let result = validate_tags(&request.tags);
+
+        assert!(result.is_ok());
     }
 }
 
@@ -685,7 +813,8 @@ mod tests {
 pub mod request_test_utils {
     use super::*;
     use crate::models::{
-        Metadata, RequestApprovalStatus, TransferOperation, TransferOperationInput,
+        asset_test_utils::mock_asset, Metadata, RequestApprovalStatus, TokenStandard,
+        TransferOperation, TransferOperationInput,
     };
     use num_bigint::BigUint;
     use uuid::Uuid;
@@ -709,7 +838,10 @@ pub mod request_test_utils {
                     metadata: Metadata::default(),
                     to: "0x1234".to_string(),
                     from_account_id: [1; 16],
+                    from_asset_id: [0; 16],
+                    with_standard: TokenStandard::InternetComputerNative,
                 },
+                asset: mock_asset(),
             }),
             approvals: vec![RequestApproval {
                 approver_id: [1; 16],
@@ -720,6 +852,8 @@ pub mod request_test_utils {
             }],
             created_timestamp: 0,
             last_modification_timestamp: 0,
+            deduplication_key: None,
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
         }
     }
 }

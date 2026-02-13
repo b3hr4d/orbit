@@ -2,24 +2,34 @@ use crate::interfaces::{
     NnsIndexCanisterInitPayload, NnsLedgerCanisterInitPayload, NnsLedgerCanisterPayload,
 };
 use crate::utils::{
-    controller_test_id, minter_test_id, set_controllers, upload_canister_modules,
-    NNS_ROOT_CANISTER_ID,
+    await_station_healthy, controller_test_id, minter_test_id, set_controllers,
+    upload_canister_modules, NNS_ROOT_CANISTER_ID,
 };
 use crate::{CanisterIds, TestEnv};
 use candid::{CandidType, Encode, Principal};
 use ic_ledger_types::{AccountIdentifier, Tokens, DEFAULT_SUBACCOUNT};
-use pocket_ic::{query_candid_as, update_candid_as, PocketIc, PocketIcBuilder};
+use pocket_ic::{update_candid_as, PocketIc, PocketIcBuilder, PocketIcState};
 use serde::Serialize;
-use station_api::{AdminInitInput, SystemInit as SystemInitArg, SystemInstall as SystemInstallArg};
+use station_api::{
+    InitUserInput, SystemInit as SystemInitArg, SystemInstall as SystemInstallArg,
+    UserIdentityInput,
+};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 pub static WALLET_ADMIN_USER: Principal = Principal::from_slice(&[1; 29]);
 pub static CANISTER_INITIAL_CYCLES: u128 = 100_000_000_000_000;
+
+#[derive(CandidType, Serialize)]
+pub struct SetAuthorizedSubnetworkListArgs {
+    pub who: Option<Principal>,
+    pub subnets: Vec<Principal>,
+}
 
 #[derive(CandidType, Serialize)]
 enum UpdateSubnetTypeArgs {
@@ -60,6 +70,8 @@ pub struct SetupConfig {
     pub upload_canister_modules: bool,
     pub fallback_controller: Option<Principal>,
     pub start_cycles: Option<u128>,
+    pub set_time_to_now: bool,
+    pub capture_state: bool,
 }
 
 impl Default for SetupConfig {
@@ -68,12 +80,50 @@ impl Default for SetupConfig {
             upload_canister_modules: true,
             fallback_controller: Some(NNS_ROOT_CANISTER_ID),
             start_cycles: None,
+            set_time_to_now: true,
+            capture_state: false,
         }
     }
 }
 
+struct CachedTestEnv {
+    pub state: PocketIcState,
+    pub canister_ids: CanisterIds,
+    pub controller: Principal,
+    pub minter: Principal,
+}
+
+static CACHED_TEST_ENV: OnceLock<CachedTestEnv> = OnceLock::new();
+
 pub fn setup_new_env() -> TestEnv {
-    setup_new_env_with_config(SetupConfig::default())
+    let cached_test_env = CACHED_TEST_ENV.get_or_init(|| {
+        let config = SetupConfig {
+            capture_state: true,
+            ..Default::default()
+        };
+
+        let test_env = setup_new_env_with_config(config);
+
+        // serialize and expose the state
+        let state = test_env.env.drop_and_take_state().unwrap();
+
+        CachedTestEnv {
+            state,
+            canister_ids: test_env.canister_ids,
+            controller: test_env.controller,
+            minter: test_env.minter,
+        }
+    });
+
+    let env = PocketIcBuilder::new()
+        .with_read_only_state(&cached_test_env.state)
+        .build();
+    TestEnv {
+        env,
+        canister_ids: cached_test_env.canister_ids,
+        controller: cached_test_env.controller,
+        minter: cached_test_env.minter,
+    }
 }
 
 pub fn setup_new_env_with_config(config: SetupConfig) -> TestEnv {
@@ -94,7 +144,11 @@ pub fn setup_new_env_with_config(config: SetupConfig) -> TestEnv {
         ", &path);
     }
 
-    let mut env = PocketIcBuilder::new()
+    let mut builder = PocketIcBuilder::new();
+    if config.capture_state {
+        builder = builder.with_state(PocketIcState::new());
+    }
+    let mut env = builder
         .with_nns_subnet()
         .with_ii_subnet()
         .with_fiduciary_subnet()
@@ -106,7 +160,10 @@ pub fn setup_new_env_with_config(config: SetupConfig) -> TestEnv {
     // live mode would set the time back to the current time.
     // Therefore, if we want to use live mode, we need to start the tests with the time
     // set to the past.
-    env.set_time(SystemTime::now() - Duration::from_secs(24 * 60 * 60));
+    let system_time = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
+    if config.set_time_to_now {
+        env.set_time(system_time.into());
+    }
     let controller = controller_test_id();
     let minter = minter_test_id();
     let canister_ids = install_canisters(&mut env, config, controller, minter);
@@ -224,6 +281,21 @@ fn install_canisters(
         Encode!(&cmc_init_args).unwrap(),
         Some(controller),
     );
+    // set default (application) subnets on CMC
+    // by setting authorized subnets associated with no principal (CMC API)
+    let application_subnet_id = env.topology().get_app_subnets()[0];
+    let set_authorized_subnetwork_list_args = SetAuthorizedSubnetworkListArgs {
+        who: None,
+        subnets: vec![application_subnet_id],
+    };
+    update_candid_as::<_, ((),)>(
+        env,
+        cmc_canister_id,
+        nns_governance_canister_id,
+        "set_authorized_subnetwork_list",
+        (set_authorized_subnetwork_list_args,),
+    )
+    .unwrap();
     // add fiduciary subnet to CMC
     let update_subnet_type_args = UpdateSubnetTypeArgs::Add("fiduciary".to_string());
     update_candid_as::<_, ((),)>(
@@ -276,45 +348,38 @@ fn install_canisters(
         upload_canister_modules(env, control_panel, controller);
     }
 
-    let station_init_args = SystemInstallArg::Init(SystemInitArg {
+    let station_init_args = SystemInstallArg::Init(Box::new(SystemInitArg {
         name: "Station".to_string(),
-        admins: vec![AdminInitInput {
-            identity: WALLET_ADMIN_USER,
-            name: "station-admin".to_string(),
-        }],
-        quorum: Some(1),
-        upgrader: station_api::SystemUpgraderInput::WasmModule(upgrader_wasm),
+
+        upgrader: station_api::SystemUpgraderInput::Deploy(
+            station_api::DeploySystemUpgraderInput {
+                wasm_module: upgrader_wasm,
+                initial_cycles: Some(5_000_000_000_000),
+            },
+        ),
         fallback_controller: config.fallback_controller,
-        accounts: None,
-    });
+        initial_config: station_api::InitialConfig::WithAllDefaults {
+            users: vec![InitUserInput {
+                identities: vec![UserIdentityInput {
+                    identity: WALLET_ADMIN_USER,
+                }],
+                name: "station-admin".to_string(),
+                groups: None,
+                id: None,
+                status: station_api::UserStatusDTO::Active,
+            }],
+            admin_quorum: 1,
+            operator_quorum: 1,
+        },
+    }));
     env.install_canister(
         station,
         station_wasm,
         Encode!(&station_init_args).unwrap(),
         Some(controller),
     );
-    // required because the station canister performs post init tasks through a one off timer
-    env.tick();
-    // required because it requires inter canister calls to initialize the UUIDs generator with a call
-    // to `raw_rand` which is not allowed in init calls,
-    env.tick();
-    env.tick();
-    // required because the station canister creates the upgrader canister
-    env.tick();
-    // required because the station canister installs the upgrader canister
-    env.tick();
-    env.tick();
-    // required because the station canister updates its own controllers
-    env.tick();
-    env.tick();
 
-    // the newly created station should be healthy at this point
-    let res: (station_api::HealthStatus,) =
-        query_candid_as(env, station, WALLET_ADMIN_USER, "health_status", ())
-            .expect("Unexpected error calling Station health_status");
-    let health_status = res.0;
-
-    assert_eq!(health_status, station_api::HealthStatus::Healthy);
+    await_station_healthy(env, station, WALLET_ADMIN_USER);
 
     CanisterIds {
         icp_ledger: nns_ledger_canister_id,

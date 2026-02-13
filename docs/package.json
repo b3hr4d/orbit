@@ -1,0 +1,33 @@
+{
+  "name": "docs-portal",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dfinity/orbit.git",
+    "directory": "docs"
+  },
+  "engines": {
+    "node": "^20",
+    "pnpm": "^9",
+    "npm": "please use pnpm",
+    "yarn": "please use pnpm"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "lint": "concurrently -n prettier,eslint -c auto \"prettier --ignore-path ../.prettierignore --check .\" \"eslint .\"",
+    "format": "concurrently -n prettier,eslint -c auto \"prettier --ignore-path ../.prettierignore --write .\" \"eslint --fix .\""
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.31.1",
+    "astro": "5.2.3",
+    "playwright": "1.49.1",
+    "rehype-mermaid": "3.0.0",
+    "sharp": "0.33.5"
+  }
+}

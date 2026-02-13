@@ -13,6 +13,8 @@ import {
   RequestWithDetails,
 } from '~/types/requests.types';
 import { RequestOperationEnum, RequestStatusEnum } from '~/types/station.types';
+import { getRequestUrl } from '~/utils/app.utils';
+import { detectAddressFormat } from '~/utils/asset.utils';
 import { formatBalance, stringify, unreachable, variantIs } from '~/utils/helper.utils';
 
 export const mapRequestsOperationTypeToGroup = (
@@ -52,6 +54,7 @@ export const mapRequestsOperationTypeToGroup = (
 
   if (
     variantIs(operationType, 'SystemUpgrade') ||
+    variantIs(operationType, 'SystemRestore') ||
     variantIs(operationType, 'SetDisasterRecovery')
   ) {
     return ListRequestsOperationTypeGroup.SystemUpgrade;
@@ -74,9 +77,29 @@ export const mapRequestsOperationTypeToGroup = (
     variantIs(operationType, 'CreateExternalCanister') ||
     variantIs(operationType, 'CallExternalCanister') ||
     variantIs(operationType, 'ConfigureExternalCanister') ||
-    variantIs(operationType, 'FundExternalCanister')
+    variantIs(operationType, 'FundExternalCanister') ||
+    variantIs(operationType, 'MonitorExternalCanister') ||
+    variantIs(operationType, 'PruneExternalCanister') ||
+    variantIs(operationType, 'RestoreExternalCanister') ||
+    variantIs(operationType, 'SnapshotExternalCanister')
   ) {
     return ListRequestsOperationTypeGroup.ExternalCanister;
+  }
+
+  if (
+    variantIs(operationType, 'AddAsset') ||
+    variantIs(operationType, 'EditAsset') ||
+    variantIs(operationType, 'RemoveAsset')
+  ) {
+    return ListRequestsOperationTypeGroup.Asset;
+  }
+
+  if (
+    variantIs(operationType, 'AddNamedRule') ||
+    variantIs(operationType, 'EditNamedRule') ||
+    variantIs(operationType, 'RemoveNamedRule')
+  ) {
+    return ListRequestsOperationTypeGroup.NamedRule;
   }
 
   return unreachable(operationType);
@@ -211,6 +234,9 @@ export const mapRequestOperationToTypeEnum = (
   if (variantIs(operation, 'SystemUpgrade')) {
     return RequestOperationEnum.SystemUpgrade;
   }
+  if (variantIs(operation, 'SystemRestore')) {
+    return RequestOperationEnum.SystemRestore;
+  }
   if (variantIs(operation, 'AddUserGroup')) {
     return RequestOperationEnum.AddUserGroup;
   }
@@ -238,8 +264,38 @@ export const mapRequestOperationToTypeEnum = (
   if (variantIs(operation, 'FundExternalCanister')) {
     return RequestOperationEnum.FundExternalCanister;
   }
+  if (variantIs(operation, 'MonitorExternalCanister')) {
+    return RequestOperationEnum.MonitorExternalCanister;
+  }
+  if (variantIs(operation, 'PruneExternalCanister')) {
+    return RequestOperationEnum.PruneExternalCanister;
+  }
+  if (variantIs(operation, 'SnapshotExternalCanister')) {
+    return RequestOperationEnum.SnapshotExternalCanister;
+  }
+  if (variantIs(operation, 'RestoreExternalCanister')) {
+    return RequestOperationEnum.RestoreExternalCanister;
+  }
   if (variantIs(operation, 'SetDisasterRecovery')) {
     return RequestOperationEnum.SetDisasterRecovery;
+  }
+  if (variantIs(operation, 'AddAsset')) {
+    return RequestOperationEnum.AddAsset;
+  }
+  if (variantIs(operation, 'EditAsset')) {
+    return RequestOperationEnum.EditAsset;
+  }
+  if (variantIs(operation, 'RemoveAsset')) {
+    return RequestOperationEnum.RemoveAsset;
+  }
+  if (variantIs(operation, 'AddNamedRule')) {
+    return RequestOperationEnum.AddNamedRule;
+  }
+  if (variantIs(operation, 'EditNamedRule')) {
+    return RequestOperationEnum.EditNamedRule;
+  }
+  if (variantIs(operation, 'RemoveNamedRule')) {
+    return RequestOperationEnum.RemoveNamedRule;
   }
 
   return unreachable(operation);
@@ -290,6 +346,8 @@ export const mapRequestOperationToListRequestsOperationType = (
     return { EditPermission: null };
   } else if (variantIs(requestOperation, 'SystemUpgrade')) {
     return { SystemUpgrade: null };
+  } else if (variantIs(requestOperation, 'SystemRestore')) {
+    return { SystemRestore: null };
   } else if (variantIs(requestOperation, 'AddUserGroup')) {
     return { AddUserGroup: null };
   } else if (variantIs(requestOperation, 'EditUserGroup')) {
@@ -308,8 +366,28 @@ export const mapRequestOperationToListRequestsOperationType = (
     return { CallExternalCanister: [] };
   } else if (variantIs(requestOperation, 'FundExternalCanister')) {
     return { FundExternalCanister: [] };
+  } else if (variantIs(requestOperation, 'MonitorExternalCanister')) {
+    return { MonitorExternalCanister: [] };
+  } else if (variantIs(requestOperation, 'PruneExternalCanister')) {
+    return { PruneExternalCanister: [] };
+  } else if (variantIs(requestOperation, 'RestoreExternalCanister')) {
+    return { RestoreExternalCanister: [] };
+  } else if (variantIs(requestOperation, 'SnapshotExternalCanister')) {
+    return { SnapshotExternalCanister: [] };
   } else if (variantIs(requestOperation, 'SetDisasterRecovery')) {
     return { SetDisasterRecovery: null };
+  } else if (variantIs(requestOperation, 'AddAsset')) {
+    return { AddAsset: null };
+  } else if (variantIs(requestOperation, 'EditAsset')) {
+    return { EditAsset: null };
+  } else if (variantIs(requestOperation, 'RemoveAsset')) {
+    return { RemoveAsset: null };
+  } else if (variantIs(requestOperation, 'AddNamedRule')) {
+    return { AddNamedRule: null };
+  } else if (variantIs(requestOperation, 'EditNamedRule')) {
+    return { EditNamedRule: null };
+  } else if (variantIs(requestOperation, 'RemoveNamedRule')) {
+    return { RemoveNamedRule: null };
   } else {
     return unreachable(requestOperation);
   }
@@ -345,6 +423,12 @@ export const mapListRequestsOperationTypeGroupToCsvHeaders = (
 
   if (group === ListRequestsOperationTypeGroup.RequestPolicy) {
     headers.policy_id = 'Policy ID';
+  }
+
+  if (group === ListRequestsOperationTypeGroup.NamedRule) {
+    headers.rule_id = 'Rule ID';
+    headers.rule_name = 'Rule Name';
+    headers.rule_description = 'Rule Description';
   }
 
   if (group === ListRequestsOperationTypeGroup.SystemUpgrade) {
@@ -421,10 +505,9 @@ const mapRequestToAccountCsvRow = (request: Request): CsvRow => {
     return {
       account_id: request.operation.AddAccount.account?.[0]?.id ?? '',
       account_name: request.operation.AddAccount.input.name,
-      blockchain: request.operation.AddAccount.input.blockchain,
       details: stringify({
         metadata: request.operation.AddAccount.input.metadata,
-        standard: request.operation.AddAccount.input.standard,
+        assets: request.operation.AddAccount.input.assets,
         configs_request_policy: request.operation.AddAccount.input.configs_request_policy,
         transfer_request_policy: request.operation.AddAccount.input.transfer_request_policy,
       }),
@@ -480,18 +563,31 @@ const mapRequestToTransferCsvRow = (request: Request): CsvRow => {
   if (variantIs(request.operation, 'Transfer') && request.operation.Transfer.from_account?.[0]) {
     const account = request.operation.Transfer.from_account[0];
 
+    const asset = request.operation.Transfer.from_asset;
+
+    // to determine the `from address` we find a matching address to the format of the `to address`
+    const maybeToAddressFormat = detectAddressFormat(
+      asset.blockchain,
+      request.operation.Transfer.input.to,
+    );
+
+    const fallbackAddress = account.addresses[0]?.address ?? '-';
+
+    const fromAddress = maybeToAddressFormat
+      ? (account.addresses.find(accountAddress => accountAddress.format === maybeToAddressFormat)
+          ?.address ?? fallbackAddress)
+      : fallbackAddress;
+
     return {
       from_account: account.name,
-      from_account_address: account.address,
+      from_account_address: fromAddress,
+      from_asset: `${asset.name} (${asset.blockchain} / ${asset.name})`,
       to: request.operation.Transfer.input.to,
       amount:
-        formatBalance(request.operation.Transfer.input.amount, account.decimals) +
-        ' ' +
-        account.symbol,
+        formatBalance(request.operation.Transfer.input.amount, asset.decimals) + ' ' + asset.symbol,
       fee: request.operation.Transfer.fee[0]
-        ? formatBalance(request.operation.Transfer.fee[0], account.decimals) + ' ' + account.symbol
+        ? formatBalance(request.operation.Transfer.fee[0], asset.decimals) + ' ' + asset.symbol
         : '',
-      // comment: request.summary[0] ?? '',
       comment: request.summary[0] ?? '',
     };
   }
@@ -517,6 +613,34 @@ const mapRequestToRequestPolicyCsvRow = (request: Request): CsvRow => {
   if (variantIs(request.operation, 'RemoveRequestPolicy')) {
     return {
       policy_id: request.operation.RemoveRequestPolicy.input.policy_id,
+    };
+  }
+
+  return {};
+};
+
+const mapRequestToNamedRuleCsvRow = (request: Request): CsvRow => {
+  if (variantIs(request.operation, 'AddNamedRule')) {
+    return {
+      rule_id: request.operation.AddNamedRule.named_rule?.[0]?.id ?? '',
+      rule_name: request.operation.AddNamedRule.input.name,
+      rule_description: request.operation.AddNamedRule.input.description?.[0] ?? '',
+      details: stringify(request.operation.AddNamedRule.input),
+    };
+  }
+
+  if (variantIs(request.operation, 'EditNamedRule')) {
+    return {
+      rule_id: request.operation.EditNamedRule.input.named_rule_id,
+      rule_name: request.operation.EditNamedRule.input.name[0] ?? '',
+      rule_description: request.operation.EditNamedRule.input.description[0]?.[0] ?? '',
+      details: stringify(request.operation.EditNamedRule.input),
+    };
+  }
+
+  if (variantIs(request.operation, 'RemoveNamedRule')) {
+    return {
+      rule_id: request.operation.RemoveNamedRule.input.named_rule_id,
     };
   }
 
@@ -580,6 +704,8 @@ export const mapRequestToCsvRow = (
       return mapRequestToSystemUpgradeCsvRow(request);
     case ListRequestsOperationTypeGroup.Transfer:
       return mapRequestToTransferCsvRow(request);
+    case ListRequestsOperationTypeGroup.NamedRule:
+      return mapRequestToNamedRuleCsvRow(request);
   }
 
   return {};
@@ -588,6 +714,8 @@ export const mapRequestToCsvRow = (
 export const mapRequestsToCsvTable = (
   group: ListRequestsOperationTypeGroup,
   requests: RequestWithDetails[],
+  origin: string,
+  stationId: string,
 ): CsvTable => {
   const table: CsvTable = { headers: {}, rows: [] };
   const headers: CsvRow = {
@@ -600,6 +728,7 @@ export const mapRequestsToCsvTable = (
     operation_type: 'Operation Type',
     ...mapListRequestsOperationTypeGroupToCsvHeaders(group),
     details: 'Details',
+    url: 'URL',
   };
 
   for (const key in headers) {
@@ -607,6 +736,8 @@ export const mapRequestsToCsvTable = (
   }
 
   const rows = requests.map(entry => {
+    const requestUrl = getRequestUrl(entry.request.id, stationId, origin);
+
     const row: CsvRow = {
       id: entry.request.id,
       requester: entry.additionalInfo?.requester_name ?? entry.request.requested_by,
@@ -617,6 +748,7 @@ export const mapRequestsToCsvTable = (
       operation_type: mapRequestOperationEnumToTranslation(
         mapRequestOperationToTypeEnum(entry.request.operation),
       ),
+      url: requestUrl,
       ...mapRequestToCsvRow(group, entry.request),
     };
 

@@ -8,15 +8,17 @@ use crate::{
             RequestPolicyRuleResult,
         },
         request_specifier::{Match, UserInvolvedInPolicyRuleForRequestResource, UserSpecifier},
-        EvaluationStatus, Request, RequestId, User, UserId, UserStatus,
+        EvaluationStatus, NamedRuleKey, Request, RequestId, User, UserId, UserStatus,
     },
     repositories::{
-        request_policy::REQUEST_POLICY_REPOSITORY, REQUEST_REPOSITORY, USER_REPOSITORY,
+        request_policy::REQUEST_POLICY_REPOSITORY, NAMED_RULE_REPOSITORY, REQUEST_REPOSITORY,
+        USER_REPOSITORY,
     },
 };
 use anyhow::Context;
 use orbit_essentials::{repository::Repository, types::UUID};
 use std::{collections::HashSet, sync::Arc};
+use uuid::Uuid;
 
 pub struct RequestEvaluator {
     pub policy_rule_evaluator: Arc<dyn EvaluateRequestPolicyRule<RequestPolicyRuleResult>>,
@@ -266,6 +268,19 @@ impl
                 Ok(possible_approvers)
             }
             RequestPolicyRule::AutoApproved => Ok(possible_approvers),
+
+            RequestPolicyRule::NamedRule(rule_id) => {
+                let named_rule = NAMED_RULE_REPOSITORY
+                    .get(&NamedRuleKey { id: *rule_id })
+                    .ok_or_else(|| EvaluateError::Failed {
+                        reason: format!(
+                            "failed to get named rule with id {}",
+                            Uuid::from_bytes(*rule_id).hyphenated()
+                        ),
+                    })?;
+
+                self.evaluate((request.to_owned(), Arc::new(named_rule.rule.to_owned())))
+            }
         }
     }
 }
@@ -302,7 +317,7 @@ impl<'a> RequestApprovalRightsEvaluator<'a> {
     }
 }
 
-impl<'a> Evaluate<bool> for RequestApprovalRightsEvaluator<'a> {
+impl Evaluate<bool> for RequestApprovalRightsEvaluator<'_> {
     fn evaluate(&self) -> Result<bool, EvaluateError> {
         let matching_policies = self
             .request
@@ -386,6 +401,23 @@ impl
                 Ok(can_approve)
             }
             RequestPolicyRule::AutoApproved => Ok(false),
+
+            RequestPolicyRule::NamedRule(rule_id) => {
+                let named_rule = NAMED_RULE_REPOSITORY
+                    .get(&NamedRuleKey { id: *rule_id })
+                    .ok_or_else(|| EvaluateError::Failed {
+                        reason: format!(
+                            "failed to get named rule with id {}",
+                            Uuid::from_bytes(*rule_id).hyphenated()
+                        ),
+                    })?;
+
+                self.evaluate((
+                    request_id.to_owned(),
+                    approver_id.to_owned(),
+                    Arc::new(named_rule.rule.to_owned()),
+                ))
+            }
         }
     }
 }
@@ -404,9 +436,9 @@ mod tests {
             request_test_utils::mock_request,
             resource::ResourceIds,
             user_test_utils::{self, mock_user},
-            Account, AccountKey, AddUserGroupOperation, AddUserGroupOperationInput, Blockchain,
-            BlockchainStandard, EvaluatedRequestPolicyRule, Metadata, MetadataItem, Percentage,
-            RequestOperation, RequestPolicy, RequestStatus, ADMIN_GROUP_ID,
+            Account, AccountKey, AddUserGroupOperation, AddUserGroupOperationInput,
+            EvaluatedRequestPolicyRule, Metadata, MetadataItem, Percentage, RequestOperation,
+            RequestPolicy, RequestStatus, ADMIN_GROUP_ID,
         },
         repositories::{
             request_policy::REQUEST_POLICY_REPOSITORY, ACCOUNT_REPOSITORY,
@@ -627,13 +659,10 @@ mod tests {
             AccountKey { id: [1; 16] },
             Account {
                 id: [1; 16],
-                blockchain: Blockchain::InternetComputer,
-                address: "a".to_owned(),
-                standard: BlockchainStandard::Native,
-                symbol: "S".to_owned(),
-                decimals: 1,
+                addresses: vec![],
+                assets: vec![],
+                seed: [0; 16],
                 name: "test".to_owned(),
-                balance: None,
                 metadata: Metadata::default(),
                 transfer_request_policy_id: None,
                 configs_request_policy_id: None,

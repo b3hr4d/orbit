@@ -1,25 +1,24 @@
 use std::{cell::RefCell, sync::Arc};
 
-use ic_stable_structures::{memory_manager::MemoryId, Log};
+use ic_stable_structures::{memory_manager::MemoryId, StableBTreeMap};
 use lazy_static::lazy_static;
+use orbit_essentials::types::Timestamp;
 
 use crate::{
     model::{LogEntry, LogEntryType},
-    Memory, MEMORY_ID_LOG_DATA, MEMORY_ID_LOG_INDEX, MEMORY_MANAGER,
+    Memory, MEMORY_ID_LOGS, MEMORY_MANAGER,
 };
 
 pub const MAX_GET_LOGS_LIMIT: u64 = 100;
 pub const DEFAULT_GET_LOGS_LIMIT: u64 = 10;
+pub const MAX_LOG_ENTRIES: u64 = 25000;
 
 thread_local! {
-
-  static STORAGE: RefCell<Log<LogEntry, Memory, Memory>> = RefCell::new(
-      Log::init(
-          MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(MEMORY_ID_LOG_INDEX))),
-          MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(MEMORY_ID_LOG_DATA))),
-      ).expect("Failed to initialize log storage")
-  );
-
+    static STORAGE: RefCell<StableBTreeMap<Timestamp, LogEntry, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(MEMORY_ID_LOGS))),
+        )
+    );
 }
 
 lazy_static! {
@@ -40,12 +39,12 @@ impl LoggerService {
     /// Tries to log an entry to the storage.
     pub fn try_log(&self, entry_type: LogEntryType) -> Result<(), String> {
         let entry = LogEntry::try_from_entry_type(entry_type)?;
-        STORAGE.with(|storage| {
-            storage
-                .borrow_mut()
-                .append(&entry)
-                .map_err(|err| format!("Failed to log entry: {:?}", err))
-        })?;
+        STORAGE.with_borrow_mut(|storage| {
+            if storage.len() >= MAX_LOG_ENTRIES {
+                let _ = storage.pop_first();
+            }
+            storage.insert(entry.time, entry);
+        });
         Ok(())
     }
 
@@ -76,16 +75,16 @@ impl LoggerService {
                 .unwrap_or(DEFAULT_GET_LOGS_LIMIT)
                 .min(MAX_GET_LOGS_LIMIT);
 
-            let first_inclusive = u64::saturating_sub(total, offset + 1);
-            let last_inclusive = u64::saturating_sub(total, offset + limit);
-
-            let logs = (last_inclusive..=first_inclusive)
+            let logs = borrowed
+                .iter()
                 .rev()
-                .filter_map(|i| borrowed.get(i))
+                .skip(offset as usize)
+                .take(limit as usize)
+                .map(|(_, v)| v)
                 .collect::<Vec<_>>();
 
-            let next_offset = if last_inclusive > 0 {
-                Some(offset + logs.len() as u64)
+            let next_offset = if total > offset + limit {
+                Some(offset + limit)
             } else {
                 None
             };
@@ -99,11 +98,11 @@ impl LoggerService {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
 
     use crate::model::{
-        test::{mock_accounts, mock_committee},
-        DisasterRecoveryResultLog, RecoveryResult, SetAccountsLog, SetCommitteeLog,
+        tests::{mock_assets, mock_committee, mock_multi_asset_accounts},
+        DisasterRecoveryResultLog, RecoveryResult, SetAccountsAndAssetsLog, SetCommitteeLog,
         UpgradeResultLog,
     };
 
@@ -121,15 +120,21 @@ mod test {
                 result: RecoveryResult::Success,
             },
         ));
-        logger_service.log(LogEntryType::SetAccounts(SetAccountsLog {
-            accounts: mock_accounts(),
-        }));
+        logger_service.log(LogEntryType::SetAccountsAndAssets(
+            SetAccountsAndAssetsLog {
+                multi_asset_accounts: mock_multi_asset_accounts(),
+                assets: mock_assets(),
+            },
+        ));
         let result = logger_service.get_logs(None, None);
-        println!("{:?}", result);
+
         assert_eq!(result.logs.len(), 4);
         assert_eq!(result.total, 4);
         assert_eq!(result.logs[3].entry_type, "set_committee".to_owned());
-        assert_eq!(result.logs[0].entry_type, "set_accounts".to_owned());
+        assert_eq!(
+            result.logs[0].entry_type,
+            "set_accounts_and_assets".to_owned()
+        );
 
         let result = logger_service.get_logs(Some(1), Some(2));
         assert_eq!(result.logs.len(), 2);
@@ -146,5 +151,28 @@ mod test {
         assert_eq!(result.total, 4);
         assert_eq!(result.next_offset, None);
         assert_eq!(result.logs[0].entry_type, "set_committee".to_owned());
+    }
+
+    #[test]
+    fn test_log_trimming() {
+        for _ in 0..MAX_LOG_ENTRIES {
+            LOGGER_SERVICE.log(LogEntryType::SetCommittee(SetCommitteeLog {
+                committee: mock_committee(),
+            }));
+        }
+
+        let result = LOGGER_SERVICE.get_logs(None, None);
+        assert_eq!(result.total, MAX_LOG_ENTRIES);
+
+        let latest_log_time = result.logs.last().unwrap().time;
+
+        LOGGER_SERVICE.log(LogEntryType::SetCommittee(SetCommitteeLog {
+            committee: mock_committee(),
+        }));
+
+        let result = LOGGER_SERVICE.get_logs(None, None);
+
+        assert_eq!(result.total, MAX_LOG_ENTRIES);
+        assert_ne!(result.logs.last().unwrap().time, latest_log_time);
     }
 }

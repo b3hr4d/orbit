@@ -1,14 +1,15 @@
 use crate::{
-    core::{generate_uuid_v4, ic_cdk::next_time, CallContext},
-    errors::UserError,
-    mappers::{SubscribedUser, UserMapper},
+    core::{
+        canister_config, generate_uuid_v4, ic_cdk::next_time, write_canister_config, CallContext,
+    },
+    errors::{DeployError, UserError},
     models::{CanDeployStation, User, UserId, UserKey, UserSubscriptionStatus},
     repositories::{UserRepository, USER_REPOSITORY},
     services::canister::FUND_MANAGER,
 };
 use candid::Principal;
 use canfund::manager::RegisterOpts;
-use control_panel_api::{RegisterUserInput, UpdateWaitingListInput};
+use control_panel_api::RegisterUserInput;
 use lazy_static::lazy_static;
 use orbit_essentials::repository::Repository;
 use orbit_essentials::{
@@ -98,8 +99,7 @@ impl UserService {
 
         let user_id = generate_uuid_v4().await;
         let user_identity = ctx.caller();
-        let user =
-            UserMapper::from_register_input(*user_id.as_bytes(), input.clone(), user_identity);
+        let user = User::new_from_register_input(*user_id.as_bytes(), input.clone(), user_identity);
 
         user.validate()?;
         self.user_repository.insert(UserKey(user.id), user.clone());
@@ -121,82 +121,33 @@ impl UserService {
         Ok(user)
     }
 
-    pub async fn subscribe_to_waiting_list(
-        &self,
-        email: String,
-        ctx: &CallContext,
-    ) -> ServiceResult<User> {
-        let mut user = self.get_user_by_identity(&ctx.caller(), ctx)?;
-
-        match user.subscription_status {
-            UserSubscriptionStatus::Pending(_)
-            | UserSubscriptionStatus::Approved
-            | UserSubscriptionStatus::Denylisted => {
-                return Err(UserError::BadUserSubscriptionStatus {
-                    subscription_status: user.subscription_status.into(),
-                }
-                .into());
-            }
-            UserSubscriptionStatus::Unsubscribed => {
-                user.subscription_status = UserSubscriptionStatus::Pending(email);
-            }
-        };
-
-        user.validate()?;
-
-        self.user_repository.insert(user.to_key(), user.clone());
-
-        Ok(user)
-    }
-
-    pub fn get_waiting_list(&self, ctx: &CallContext) -> ServiceResult<Vec<SubscribedUser>> {
-        self.assert_controller(ctx)?;
-
-        Ok(self.user_repository.get_subscribed_users())
-    }
-
-    pub fn update_waiting_list(
-        &self,
-        input: UpdateWaitingListInput,
-        ctx: &CallContext,
-    ) -> ServiceResult<()> {
-        self.assert_controller(ctx)?;
-
-        for user_principal in input.users {
-            let mut user = self.get_user_by_identity(&user_principal, ctx)?;
-
-            user.subscription_status = input.new_status.clone().try_into()?;
-
-            user.validate()?;
-
-            self.user_repository.insert(user.to_key(), user.clone());
-        }
-
-        Ok(())
-    }
-
     /// Returns all deployed stations in the system.
     pub fn get_all_deployed_stations(&self) -> BTreeSet<Principal> {
         let users = self.user_repository.list();
 
         users
             .into_iter()
-            .flat_map(|user| user.deployed_stations)
+            .flat_map(|user| user.get_deployed_stations())
             .collect()
     }
 
-    pub async fn add_deployed_station(
+    pub fn add_deployed_station(
         &self,
         user_id: &UserId,
         station_canister_id: Principal,
         ctx: &CallContext,
     ) -> ServiceResult<User> {
         let mut user = self.get_user(user_id, ctx)?;
+        let mut config = canister_config().ok_or(DeployError::Failed {
+            reason: "Canister config not initialized.".to_string(),
+        })?;
 
-        user.deployed_stations.push(station_canister_id);
+        config.global_rate_limiter.add_deployed_station();
+        user.add_deployed_station(station_canister_id);
 
         user.validate()?;
 
+        write_canister_config(config);
         self.user_repository.insert(user.to_key(), user.clone());
 
         FUND_MANAGER.with(|fund_manager| {
@@ -211,21 +162,32 @@ impl UserService {
     }
 
     /// Checks if a user can deploy a station.
-    pub async fn can_deploy_station(&self, ctx: &CallContext) -> ServiceResult<CanDeployStation> {
+    pub fn can_deploy_station(&self, ctx: &CallContext) -> ServiceResult<CanDeployStation> {
         let user = self.get_user_by_identity(&ctx.caller(), ctx)?;
+        let config = canister_config().ok_or(DeployError::Failed {
+            reason: "Canister config not initialized.".to_string(),
+        })?;
 
-        Ok(user.can_deploy_station())
-    }
+        let allowed_globally = match config.global_rate_limiter.can_deploy_station() {
+            CanDeployStation::Allowed(remaining) => remaining,
+            CanDeployStation::QuotaExceeded => return Ok(CanDeployStation::QuotaExceeded),
+            CanDeployStation::NotAllowed(subscription_status) => {
+                return Ok(CanDeployStation::NotAllowed(subscription_status))
+            }
+        };
 
-    /// Checks if the caller is a controller.
-    fn assert_controller(&self, ctx: &CallContext) -> ServiceResult<()> {
-        if !ctx.is_controller() {
-            Err(UserError::Forbidden {
-                user: ctx.caller().to_text(),
-            })?
-        }
+        let allowed_per_user = match user.can_deploy_station() {
+            CanDeployStation::Allowed(remaining) => remaining,
+            CanDeployStation::QuotaExceeded => return Ok(CanDeployStation::QuotaExceeded),
+            CanDeployStation::NotAllowed(subscription_status) => {
+                return Ok(CanDeployStation::NotAllowed(subscription_status))
+            }
+        };
 
-        Ok(())
+        Ok(CanDeployStation::Allowed(std::cmp::min(
+            allowed_globally,
+            allowed_per_user,
+        )))
     }
 
     /// Checks if the caller has access to the given user.
@@ -256,14 +218,21 @@ impl UserService {
 
         Ok(())
     }
+
+    /// Set the subscription status of all users to `UserSubscriptionStatus::Approved`.
+    pub fn approve_all_users(&self) {
+        for mut user in self.user_repository.list() {
+            user.subscription_status = UserSubscriptionStatus::Approved;
+            self.user_repository.insert(user.to_key(), user);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{user_model_utils::mock_user, UserSubscriptionStatus};
-    use control_panel_api::{UserStationDTO, UserSubscriptionStatusDTO};
-    use orbit_essentials::cdk::mocks::TEST_CONTROLLER_ID;
+    use crate::models::user_model_utils::mock_user;
+    use control_panel_api::UserStationDTO;
 
     #[test]
     fn get_user_returns_not_found_err() {
@@ -374,46 +343,6 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(duplicated_user_result.is_err());
-    }
-
-    #[test]
-    fn update_waiting_list() {
-        let mut user = mock_user();
-        let ctx = CallContext::new(user.identity);
-        let service = UserService::default();
-        user.subscription_status = UserSubscriptionStatus::Unsubscribed;
-
-        service.user_repository.insert(user.to_key(), user.clone());
-
-        let input = UpdateWaitingListInput {
-            users: vec![user.identity],
-            new_status: UserSubscriptionStatusDTO::Approved,
-        };
-
-        // only controllers can update waiting list
-        service
-            .update_waiting_list(input.clone(), &ctx)
-            .unwrap_err();
-
-        let ctrl_ctx = CallContext::new(TEST_CONTROLLER_ID);
-
-        service
-            .update_waiting_list(input.clone(), &ctrl_ctx)
-            .unwrap();
-
-        let result = service.get_user_by_identity(&user.identity, &ctx);
-        assert!(matches!(
-            result.unwrap().subscription_status,
-            UserSubscriptionStatus::Approved
-        ));
-
-        let mut bad_input = input;
-        bad_input.new_status = UserSubscriptionStatusDTO::Pending;
-
-        // status cannot be set to Pending
-        service
-            .update_waiting_list(bad_input, &ctrl_ctx)
-            .unwrap_err();
     }
 
     #[tokio::test]

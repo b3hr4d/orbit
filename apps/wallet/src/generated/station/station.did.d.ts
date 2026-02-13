@@ -5,22 +5,25 @@ import type { IDL } from '@dfinity/candid';
 export interface Account {
   'id' : UUID,
   'configs_request_policy' : [] | [RequestPolicyRule],
-  'decimals' : number,
-  'balance' : [] | [AccountBalanceInfo],
   'metadata' : Array<AccountMetadata>,
   'name' : string,
-  'blockchain' : string,
-  'address' : string,
+  'assets' : Array<AccountAsset>,
+  'addresses' : Array<AccountAddress>,
   'transfer_request_policy' : [] | [RequestPolicyRule],
   'last_modification_timestamp' : TimestampRFC3339,
-  'standard' : string,
-  'symbol' : AssetSymbol,
+}
+export interface AccountAddress { 'address' : string, 'format' : string }
+export interface AccountAsset {
+  'balance' : [] | [AccountBalance],
+  'asset_id' : UUID,
 }
 export interface AccountBalance {
   'account_id' : UUID,
   'decimals' : number,
   'balance' : bigint,
   'last_update_timestamp' : TimestampRFC3339,
+  'query_state' : string,
+  'asset_id' : UUID,
 }
 export interface AccountBalanceInfo {
   'decimals' : number,
@@ -38,6 +41,7 @@ export type AccountResourceAction = { 'List' : null } |
   { 'Create' : null } |
   { 'Transfer' : ResourceId } |
   { 'Update' : ResourceId };
+export type AccountSeed = Uint8Array | number[];
 export interface AddAccountOperation {
   'account' : [] | [Account],
   'input' : AddAccountOperationInput,
@@ -48,10 +52,9 @@ export interface AddAccountOperationInput {
   'configs_permission' : Allow,
   'metadata' : Array<AccountMetadata>,
   'name' : string,
-  'blockchain' : string,
+  'assets' : Array<UUID>,
   'transfer_request_policy' : [] | [RequestPolicyRule],
   'transfer_permission' : Allow,
-  'standard' : string,
 }
 export interface AddAddressBookEntryOperation {
   'address_book_entry' : [] | [AddressBookEntry],
@@ -62,7 +65,29 @@ export interface AddAddressBookEntryOperationInput {
   'labels' : Array<string>,
   'blockchain' : string,
   'address' : string,
+  'address_format' : string,
   'address_owner' : string,
+}
+export interface AddAssetOperation {
+  'asset' : [] | [Asset],
+  'input' : AddAssetOperationInput,
+}
+export interface AddAssetOperationInput {
+  'decimals' : number,
+  'standards' : Array<string>,
+  'metadata' : Array<AssetMetadata>,
+  'name' : string,
+  'blockchain' : string,
+  'symbol' : AssetSymbol,
+}
+export interface AddNamedRuleOperation {
+  'named_rule' : [] | [NamedRule],
+  'input' : AddNamedRuleOperationInput,
+}
+export interface AddNamedRuleOperationInput {
+  'name' : string,
+  'rule' : RequestPolicyRule,
+  'description' : [] | [string],
 }
 export interface AddRequestPolicyOperation {
   'input' : AddRequestPolicyOperationInput,
@@ -94,6 +119,7 @@ export interface AddressBookEntry {
   'blockchain' : string,
   'address' : string,
   'last_modification_timestamp' : string,
+  'address_format' : string,
   'address_owner' : string,
 }
 export interface AddressBookEntryCallerPrivileges {
@@ -102,18 +128,24 @@ export interface AddressBookEntryCallerPrivileges {
   'can_edit' : boolean,
 }
 export interface AddressBookMetadata { 'key' : string, 'value' : string }
-export interface AdminInitInput { 'name' : string, 'identity' : Principal }
 export interface Allow {
   'user_groups' : Array<UUID>,
   'auth_scope' : AuthScope,
   'users' : Array<UUID>,
 }
 export interface Asset {
+  'id' : UUID,
+  'decimals' : number,
+  'standards' : Array<string>,
   'metadata' : Array<AssetMetadata>,
   'name' : string,
   'blockchain' : string,
-  'standard' : string,
   'symbol' : AssetSymbol,
+}
+export interface AssetCallerPrivileges {
+  'id' : UUID,
+  'can_delete' : boolean,
+  'can_edit' : boolean,
 }
 export interface AssetMetadata { 'key' : string, 'value' : string }
 export type AssetSymbol = string;
@@ -144,6 +176,12 @@ export interface CallExternalCanisterResourceTarget {
   'execution_method' : ExecutionMethodResourceTarget,
   'validation_method' : ValidationMethodResourceTarget,
 }
+export interface CancelRequestInput {
+  'request_id' : UUID,
+  'reason' : [] | [string],
+}
+export type CancelRequestResult = { 'Ok' : { 'request' : Request } } |
+  { 'Err' : Error };
 export interface CanisterExecutionAndValidationMethodPair {
   'execution_method' : string,
   'validation_method' : ValidationMethodResourceTarget,
@@ -155,6 +193,16 @@ export interface CanisterMethod {
   'canister_id' : Principal,
   'method_name' : string,
 }
+export interface CanisterSnapshotsInput { 'canister_id' : Principal }
+export type CanisterSnapshotsResponse = Array<
+  {
+    'total_size' : bigint,
+    'taken_at_timestamp' : TimestampRFC3339,
+    'snapshot_id' : string,
+  }
+>;
+export type CanisterSnapshotsResult = { 'Ok' : CanisterSnapshotsResponse } |
+  { 'Err' : Error };
 export interface CanisterStatusInput { 'canister_id' : Principal }
 export interface CanisterStatusResponse {
   'status' : { 'stopped' : null } |
@@ -173,12 +221,11 @@ export interface CanisterStatusResponse {
   'module_hash' : [] | [Uint8Array | number[]],
   'reserved_cycles' : bigint,
 }
-export type CanisterStatusResult = { 'Ok' : CanisterStatusResponse } |
-  { 'Err' : Error };
 export interface Capabilities {
   'name' : string,
   'version' : string,
   'supported_assets' : Array<Asset>,
+  'supported_blockchains' : Array<SupportedBlockchain>,
 }
 export type CapabilitiesResult = { 'Ok' : { 'capabilities' : Capabilities } } |
   { 'Err' : Error };
@@ -187,6 +234,13 @@ export type ChangeAddressBookMetadata = {
   } |
   { 'RemoveKeys' : Array<string> } |
   { 'ReplaceAllBy' : Array<AddressBookMetadata> };
+export type ChangeAssets = { 'ReplaceWith' : { 'assets' : Array<UUID> } } |
+  { 'Change' : { 'add_assets' : Array<UUID>, 'remove_assets' : Array<UUID> } };
+export type ChangeExternalCanisterMetadata = {
+    'OverrideSpecifiedBy' : Array<ExternalCanisterMetadata>
+  } |
+  { 'RemoveKeys' : Array<string> } |
+  { 'ReplaceAllBy' : Array<ExternalCanisterMetadata> };
 export interface ChangeExternalCanisterOperation {
   'mode' : CanisterInstallMode,
   'canister_id' : Principal,
@@ -200,6 +254,9 @@ export interface ChangeExternalCanisterOperationInput {
   'canister_id' : Principal,
   'module' : Uint8Array | number[],
 }
+export type ChangeMetadata = { 'OverrideSpecifiedBy' : Array<AssetMetadata> } |
+  { 'RemoveKeys' : Array<string> } |
+  { 'ReplaceAllBy' : Array<AssetMetadata> };
 export type ConfigureExternalCanisterOperation = ConfigureExternalCanisterOperationInput;
 export interface ConfigureExternalCanisterOperationInput {
   'kind' : ConfigureExternalCanisterOperationKind,
@@ -216,6 +273,7 @@ export interface ConfigureExternalCanisterSettingsInput {
   'description' : [] | [string],
   'request_policies' : [] | [ExternalCanisterRequestPoliciesUpdateInput],
   'state' : [] | [ExternalCanisterState],
+  'change_metadata' : [] | [ChangeExternalCanisterMetadata],
 }
 export interface CreateExternalCanisterOperation {
   'canister_id' : [] | [Principal],
@@ -223,6 +281,7 @@ export interface CreateExternalCanisterOperation {
 }
 export interface CreateExternalCanisterOperationInput {
   'permissions' : ExternalCanisterPermissionsCreateInput,
+  'metadata' : [] | [Array<ExternalCanisterMetadata>],
   'kind' : CreateExternalCanisterOperationKind,
   'name' : string,
   'labels' : [] | [Array<string>],
@@ -243,6 +302,9 @@ export interface CreateExternalCanisterOperationKindCreateNew {
 export interface CreateRequestInput {
   'title' : [] | [string],
   'execution_plan' : [] | [RequestExecutionSchedule],
+  'expiration_dt' : [] | [TimestampRFC3339],
+  'deduplication_key' : [] | [string],
+  'tags' : [] | [Array<string>],
   'summary' : [] | [string],
   'operation' : RequestOperationInput,
 }
@@ -260,9 +322,16 @@ export type CycleObtainStrategy = { 'Disabled' : null } |
       'account_id' : UUID,
       'account_name' : [] | [string],
     }
+  } |
+  {
+    'WithdrawFromCyclesLedger' : {
+      'account_id' : UUID,
+      'account_name' : [] | [string],
+    }
   };
 export type CycleObtainStrategyInput = { 'Disabled' : null } |
-  { 'MintFromNativeToken' : { 'account_id' : UUID } };
+  { 'MintFromNativeToken' : { 'account_id' : UUID } } |
+  { 'WithdrawFromCyclesLedger' : { 'account_id' : UUID } };
 export interface DefiniteCanisterSettings {
   'freezing_threshold' : bigint,
   'controllers' : Array<Principal>,
@@ -297,6 +366,7 @@ export interface EditAccountOperationInput {
   'read_permission' : [] | [Allow],
   'configs_permission' : [] | [Allow],
   'name' : [] | [string],
+  'change_assets' : [] | [ChangeAssets],
   'transfer_request_policy' : [] | [RequestPolicyRuleInput],
   'transfer_permission' : [] | [Allow],
 }
@@ -308,6 +378,24 @@ export interface EditAddressBookEntryOperationInput {
   'change_metadata' : [] | [ChangeAddressBookMetadata],
   'address_book_entry_id' : UUID,
   'address_owner' : [] | [string],
+}
+export interface EditAssetOperation { 'input' : EditAssetOperationInput }
+export interface EditAssetOperationInput {
+  'standards' : [] | [Array<string>],
+  'name' : [] | [string],
+  'blockchain' : [] | [string],
+  'change_metadata' : [] | [ChangeMetadata],
+  'asset_id' : UUID,
+  'symbol' : [] | [AssetSymbol],
+}
+export interface EditNamedRuleOperation {
+  'input' : EditNamedRuleOperationInput,
+}
+export interface EditNamedRuleOperationInput {
+  'name' : [] | [string],
+  'rule' : [] | [RequestPolicyRule],
+  'description' : [] | [[] | [string]],
+  'named_rule_id' : UUID,
 }
 export interface EditPermissionOperation {
   'input' : EditPermissionOperationInput,
@@ -380,6 +468,7 @@ export interface ExternalCanister {
   'id' : UUID,
   'permissions' : ExternalCanisterPermissions,
   'modified_at' : [] | [TimestampRFC3339],
+  'metadata' : Array<ExternalCanisterMetadata>,
   'name' : string,
   'labels' : Array<string>,
   'canister_id' : Principal,
@@ -387,6 +476,7 @@ export interface ExternalCanister {
   'created_at' : TimestampRFC3339,
   'request_policies' : ExternalCanisterRequestPolicies,
   'state' : ExternalCanisterState,
+  'monitoring' : [] | [MonitorExternalCanisterStartInput],
 }
 export interface ExternalCanisterCallPermission {
   'execution_method' : string,
@@ -474,6 +564,7 @@ export interface ExternalCanisterChangeRequestPolicyRuleInput {
 }
 export type ExternalCanisterId = { 'Any' : null } |
   { 'Canister' : Principal };
+export interface ExternalCanisterMetadata { 'key' : string, 'value' : string }
 export interface ExternalCanisterPermissions {
   'calls' : Array<ExternalCanisterCallPermission>,
   'read' : Allow,
@@ -509,7 +600,7 @@ export type ExternalCanisterState = { 'Active' : null } |
   { 'Archived' : null };
 export interface FetchAccountBalancesInput { 'account_ids' : Array<UUID> }
 export type FetchAccountBalancesResult = {
-    'Ok' : { 'balances' : Array<AccountBalance> }
+    'Ok' : { 'balances' : Array<[] | [AccountBalance]> }
   } |
   { 'Err' : Error };
 export type FundExternalCanisterOperation = FundExternalCanisterOperationInput;
@@ -534,6 +625,11 @@ export type GetAddressBookEntryResult = {
     }
   } |
   { 'Err' : Error };
+export interface GetAssetInput { 'asset_id' : UUID }
+export type GetAssetResult = {
+    'Ok' : { 'privileges' : AssetCallerPrivileges, 'asset' : Asset }
+  } |
+  { 'Err' : Error };
 export interface GetExternalCanisterFiltersInput {
   'with_labels' : [] | [boolean],
   'with_name' : [] | [{ 'prefix' : [] | [string] }],
@@ -553,7 +649,16 @@ export type GetExternalCanisterResult = {
     }
   } |
   { 'Err' : Error };
+export interface GetNamedRuleInput { 'named_rule_id' : UUID }
+export type GetNamedRuleResult = {
+    'Ok' : {
+      'privileges' : NamedRuleCallerPrivileges,
+      'named_rule' : NamedRule,
+    }
+  } |
+  { 'Err' : Error };
 export interface GetNextApprovableRequestInput {
+  'sort_by' : [] | [ListRequestsSortBy],
   'excluded_request_ids' : Array<UUID>,
   'operation_types' : [] | [Array<ListRequestsOperationType>],
 }
@@ -622,9 +727,77 @@ export interface InitAccountInput {
   'id' : [] | [UUID],
   'metadata' : Array<AccountMetadata>,
   'name' : string,
-  'blockchain' : string,
-  'standard' : string,
+  'assets' : Array<UUID>,
+  'seed' : AccountSeed,
 }
+export interface InitAccountPermissionsInput {
+  'configs_request_policy' : [] | [RequestPolicyRule],
+  'read_permission' : Allow,
+  'configs_permission' : Allow,
+  'transfer_request_policy' : [] | [RequestPolicyRule],
+  'transfer_permission' : Allow,
+}
+export interface InitAccountWithPermissionsInput {
+  'permissions' : InitAccountPermissionsInput,
+  'account_init' : InitAccountInput,
+}
+export interface InitAssetInput {
+  'id' : [] | [UUID],
+  'decimals' : number,
+  'standards' : Array<string>,
+  'metadata' : Array<AssetMetadata>,
+  'name' : string,
+  'blockchain' : string,
+  'symbol' : string,
+}
+export interface InitNamedRuleInput {
+  'id' : [] | [UUID],
+  'name' : string,
+  'rule' : RequestPolicyRule,
+  'description' : [] | [string],
+}
+export interface InitPermissionInput { 'resource' : Resource, 'allow' : Allow }
+export interface InitRequestPolicyInput {
+  'id' : [] | [UUID],
+  'rule' : RequestPolicyRule,
+  'specifier' : RequestSpecifier,
+}
+export interface InitUserGroupInput { 'id' : [] | [UUID], 'name' : string }
+export interface InitUserInput {
+  'id' : [] | [UUID],
+  'status' : UserStatus,
+  'groups' : [] | [Array<UUID>],
+  'name' : string,
+  'identities' : Array<UserIdentityInput>,
+}
+export type InitialConfig = {
+    'WithDefaultPolicies' : {
+      'assets' : Array<InitAssetInput>,
+      'admin_quorum' : number,
+      'accounts' : Array<InitAccountInput>,
+      'users' : Array<InitUserInput>,
+      'operator_quorum' : number,
+    }
+  } |
+  {
+    'WithAllDefaults' : {
+      'admin_quorum' : number,
+      'users' : Array<InitUserInput>,
+      'operator_quorum' : number,
+    }
+  } |
+  {
+    'Complete' : {
+      'permissions' : Array<InitPermissionInput>,
+      'assets' : Array<InitAssetInput>,
+      'request_policies' : Array<InitRequestPolicyInput>,
+      'user_groups' : Array<InitUserGroupInput>,
+      'accounts' : Array<InitAccountWithPermissionsInput>,
+      'disaster_recovery_committee' : [] | [DisasterRecoveryCommittee],
+      'users' : Array<InitUserInput>,
+      'named_rules' : Array<InitNamedRuleInput>,
+    }
+  };
 export interface ListAccountTransfersInput {
   'account_id' : UUID,
   'status' : [] | [TransferStatusType],
@@ -650,16 +823,28 @@ export type ListAccountsResult = {
   { 'Err' : Error };
 export interface ListAddressBookEntriesInput {
   'ids' : [] | [Array<UUID>],
+  'address_formats' : [] | [Array<string>],
   'labels' : [] | [Array<string>],
   'blockchain' : [] | [string],
   'addresses' : [] | [Array<string>],
   'paginate' : [] | [PaginationInput],
+  'search_term' : [] | [string],
 }
 export type ListAddressBookEntriesResult = {
     'Ok' : {
       'total' : bigint,
       'privileges' : Array<AddressBookEntryCallerPrivileges>,
       'address_book_entries' : Array<AddressBookEntry>,
+      'next_offset' : [] | [bigint],
+    }
+  } |
+  { 'Err' : Error };
+export interface ListAssetsInput { 'paginate' : [] | [PaginationInput] }
+export type ListAssetsResult = {
+    'Ok' : {
+      'total' : bigint,
+      'privileges' : Array<AssetCallerPrivileges>,
+      'assets' : Array<Asset>,
       'next_offset' : [] | [bigint],
     }
   } |
@@ -681,6 +866,16 @@ export type ListExternalCanistersResult = {
   } |
   { 'Err' : Error };
 export type ListExternalCanistersSortInput = { 'Name' : SortByDirection };
+export interface ListNamedRulesInput { 'paginate' : [] | [PaginationInput] }
+export type ListNamedRulesResult = {
+    'Ok' : {
+      'total' : bigint,
+      'privileges' : Array<NamedRuleCallerPrivileges>,
+      'named_rules' : Array<NamedRule>,
+      'next_offset' : [] | [bigint],
+    }
+  } |
+  { 'Err' : Error };
 export interface ListNotificationsInput {
   'status' : [] | [NotificationStatus],
   'to_dt' : [] | [TimestampRFC3339],
@@ -718,8 +913,10 @@ export type ListRequestPoliciesResult = {
   { 'Err' : Error };
 export interface ListRequestsInput {
   'sort_by' : [] | [ListRequestsSortBy],
+  'deduplication_keys' : [] | [Array<string>],
   'with_evaluation_results' : boolean,
   'expiration_from_dt' : [] | [TimestampRFC3339],
+  'tags' : [] | [Array<string>],
   'created_to_dt' : [] | [TimestampRFC3339],
   'statuses' : [] | [Array<RequestStatusCode>],
   'approver_ids' : [] | [Array<UUID>],
@@ -730,17 +927,25 @@ export interface ListRequestsInput {
   'only_approvable' : boolean,
   'created_from_dt' : [] | [TimestampRFC3339],
 }
-export type ListRequestsOperationType = { 'AddUserGroup' : null } |
+export type ListRequestsOperationType = { 'RemoveAsset' : null } |
+  { 'AddUserGroup' : null } |
   { 'EditPermission' : null } |
+  { 'SnapshotExternalCanister' : [] | [Principal] } |
+  { 'PruneExternalCanister' : [] | [Principal] } |
+  { 'EditNamedRule' : null } |
   { 'ConfigureExternalCanister' : [] | [Principal] } |
   { 'ChangeExternalCanister' : [] | [Principal] } |
+  { 'MonitorExternalCanister' : [] | [Principal] } |
   { 'AddUser' : null } |
+  { 'EditAsset' : null } |
   { 'EditUserGroup' : null } |
   { 'SetDisasterRecovery' : null } |
   { 'EditRequestPolicy' : null } |
   { 'RemoveRequestPolicy' : null } |
+  { 'AddAsset' : null } |
   { 'SystemUpgrade' : null } |
   { 'RemoveAddressBookEntry' : null } |
+  { 'SystemRestore' : null } |
   { 'CreateExternalCanister' : null } |
   { 'EditAddressBookEntry' : null } |
   { 'FundExternalCanister' : [] | [Principal] } |
@@ -750,8 +955,11 @@ export type ListRequestsOperationType = { 'AddUserGroup' : null } |
   { 'EditAccount' : null } |
   { 'AddAddressBookEntry' : null } |
   { 'AddRequestPolicy' : null } |
+  { 'RemoveNamedRule' : null } |
   { 'RemoveUserGroup' : null } |
   { 'CallExternalCanister' : [] | [Principal] } |
+  { 'AddNamedRule' : null } |
+  { 'RestoreExternalCanister' : [] | [Principal] } |
   { 'AddAccount' : null };
 export type ListRequestsResult = {
     'Ok' : {
@@ -795,13 +1003,16 @@ export type ListUsersResult = {
   } |
   { 'Err' : Error };
 export type LogVisibility = { 'controllers' : null } |
-  { 'public' : null };
+  { 'public' : null } |
+  { 'allowed_viewers' : Array<Principal> };
 export interface ManageSystemInfoOperation {
   'input' : ManageSystemInfoOperationInput,
 }
 export interface ManageSystemInfoOperationInput {
   'name' : [] | [string],
   'cycle_obtain_strategy' : [] | [CycleObtainStrategyInput],
+  'max_upgrader_backup_snapshots' : [] | [bigint],
+  'max_station_backup_snapshots' : [] | [bigint],
 }
 export type MarkNotificationReadResult = { 'Ok' : null } |
   { 'Err' : Error };
@@ -813,6 +1024,44 @@ export type MeResult = {
     'Ok' : { 'me' : User, 'privileges' : Array<UserPrivilege> }
   } |
   { 'Err' : Error };
+export type MonitorExternalCanisterOperation = MonitorExternalCanisterOperationInput;
+export interface MonitorExternalCanisterOperationInput {
+  'kind' : MonitorExternalCanisterOperationKind,
+  'canister_id' : Principal,
+}
+export type MonitorExternalCanisterOperationKind = {
+    'Start' : MonitorExternalCanisterStartInput
+  } |
+  { 'Stop' : null };
+export interface MonitorExternalCanisterStartInput {
+  'cycle_obtain_strategy' : [] | [CycleObtainStrategyInput],
+  'funding_strategy' : MonitorExternalCanisterStrategyInput,
+}
+export type MonitorExternalCanisterStrategyInput = { 'Always' : bigint } |
+  { 'BelowThreshold' : MonitoringExternalCanisterCyclesThresholdInput } |
+  { 'BelowEstimatedRuntime' : MonitoringExternalCanisterEstimatedRuntimeInput };
+export interface MonitoringExternalCanisterCyclesThresholdInput {
+  'fund_cycles' : bigint,
+  'min_cycles' : bigint,
+}
+export interface MonitoringExternalCanisterEstimatedRuntimeInput {
+  'fund_runtime_secs' : bigint,
+  'fallback_min_cycles' : bigint,
+  'min_runtime_secs' : bigint,
+  'fallback_fund_cycles' : bigint,
+  'max_runtime_cycles_fund' : bigint,
+}
+export interface NamedRule {
+  'id' : UUID,
+  'name' : string,
+  'rule' : RequestPolicyRule,
+  'description' : [] | [string],
+}
+export interface NamedRuleCallerPrivileges {
+  'id' : UUID,
+  'can_delete' : boolean,
+  'can_edit' : boolean,
+}
 export interface Network { 'id' : NetworkId, 'name' : string }
 export type NetworkId = string;
 export interface Notification {
@@ -867,6 +1116,15 @@ export interface PermissionCallerPrivileges {
 }
 export type PermissionResourceAction = { 'Read' : null } |
   { 'Update' : null };
+export interface PruneExternalCanisterOperation {
+  'input' : PruneExternalCanisterOperationInput,
+}
+export interface PruneExternalCanisterOperationInput {
+  'canister_id' : Principal,
+  'prune' : { 'snapshot' : string } |
+    { 'state' : null } |
+    { 'chunk_store' : null },
+}
 export interface Quorum { 'min_approved' : number, 'approvers' : UserSpecifier }
 export interface QuorumPercentage {
   'min_approved' : number,
@@ -878,6 +1136,12 @@ export interface RemoveAddressBookEntryOperation {
 export interface RemoveAddressBookEntryOperationInput {
   'address_book_entry_id' : UUID,
 }
+export interface RemoveAssetOperation { 'input' : RemoveAssetOperationInput }
+export interface RemoveAssetOperationInput { 'asset_id' : UUID }
+export interface RemoveNamedRuleOperation {
+  'input' : RemoveNamedRuleOperationInput,
+}
+export interface RemoveNamedRuleOperationInput { 'named_rule_id' : UUID }
 export interface RemoveRequestPolicyOperation {
   'input' : RemoveRequestPolicyOperationInput,
 }
@@ -892,6 +1156,8 @@ export interface Request {
   'title' : string,
   'execution_plan' : RequestExecutionSchedule,
   'expiration_dt' : TimestampRFC3339,
+  'deduplication_key' : [] | [string],
+  'tags' : Array<string>,
   'created_at' : TimestampRFC3339,
   'requested_by' : UUID,
   'summary' : [] | [string],
@@ -924,17 +1190,25 @@ export interface RequestEvaluationResult {
 }
 export type RequestExecutionSchedule = { 'Immediate' : null } |
   { 'Scheduled' : { 'execution_time' : TimestampRFC3339 } };
-export type RequestOperation = { 'AddUserGroup' : AddUserGroupOperation } |
+export type RequestOperation = { 'RemoveAsset' : RemoveAssetOperation } |
+  { 'AddUserGroup' : AddUserGroupOperation } |
   { 'EditPermission' : EditPermissionOperation } |
+  { 'SnapshotExternalCanister' : SnapshotExternalCanisterOperation } |
+  { 'PruneExternalCanister' : PruneExternalCanisterOperation } |
+  { 'EditNamedRule' : EditNamedRuleOperation } |
   { 'ConfigureExternalCanister' : ConfigureExternalCanisterOperation } |
   { 'ChangeExternalCanister' : ChangeExternalCanisterOperation } |
+  { 'MonitorExternalCanister' : MonitorExternalCanisterOperation } |
   { 'AddUser' : AddUserOperation } |
+  { 'EditAsset' : EditAssetOperation } |
   { 'EditUserGroup' : EditUserGroupOperation } |
   { 'SetDisasterRecovery' : SetDisasterRecoveryOperation } |
   { 'EditRequestPolicy' : EditRequestPolicyOperation } |
   { 'RemoveRequestPolicy' : RemoveRequestPolicyOperation } |
+  { 'AddAsset' : AddAssetOperation } |
   { 'SystemUpgrade' : SystemUpgradeOperation } |
   { 'RemoveAddressBookEntry' : RemoveAddressBookEntryOperation } |
+  { 'SystemRestore' : SystemRestoreOperation } |
   { 'CreateExternalCanister' : CreateExternalCanisterOperation } |
   { 'EditAddressBookEntry' : EditAddressBookEntryOperation } |
   { 'FundExternalCanister' : FundExternalCanisterOperation } |
@@ -944,22 +1218,33 @@ export type RequestOperation = { 'AddUserGroup' : AddUserGroupOperation } |
   { 'EditAccount' : EditAccountOperation } |
   { 'AddAddressBookEntry' : AddAddressBookEntryOperation } |
   { 'AddRequestPolicy' : AddRequestPolicyOperation } |
+  { 'RemoveNamedRule' : RemoveNamedRuleOperation } |
   { 'RemoveUserGroup' : RemoveUserGroupOperation } |
   { 'CallExternalCanister' : CallExternalCanisterOperation } |
+  { 'AddNamedRule' : AddNamedRuleOperation } |
+  { 'RestoreExternalCanister' : RestoreExternalCanisterOperation } |
   { 'AddAccount' : AddAccountOperation };
 export type RequestOperationInput = {
-    'AddUserGroup' : AddUserGroupOperationInput
+    'RemoveAsset' : RemoveAssetOperationInput
   } |
+  { 'AddUserGroup' : AddUserGroupOperationInput } |
   { 'EditPermission' : EditPermissionOperationInput } |
+  { 'SnapshotExternalCanister' : SnapshotExternalCanisterOperationInput } |
+  { 'PruneExternalCanister' : PruneExternalCanisterOperationInput } |
+  { 'EditNamedRule' : EditNamedRuleOperationInput } |
   { 'ConfigureExternalCanister' : ConfigureExternalCanisterOperationInput } |
   { 'ChangeExternalCanister' : ChangeExternalCanisterOperationInput } |
+  { 'MonitorExternalCanister' : MonitorExternalCanisterOperationInput } |
   { 'AddUser' : AddUserOperationInput } |
+  { 'EditAsset' : EditAssetOperationInput } |
   { 'EditUserGroup' : EditUserGroupOperationInput } |
   { 'SetDisasterRecovery' : SetDisasterRecoveryOperationInput } |
   { 'EditRequestPolicy' : EditRequestPolicyOperationInput } |
   { 'RemoveRequestPolicy' : RemoveRequestPolicyOperationInput } |
+  { 'AddAsset' : AddAssetOperationInput } |
   { 'SystemUpgrade' : SystemUpgradeOperationInput } |
   { 'RemoveAddressBookEntry' : RemoveAddressBookEntryOperationInput } |
+  { 'SystemRestore' : SystemRestoreOperationInput } |
   { 'CreateExternalCanister' : CreateExternalCanisterOperationInput } |
   { 'EditAddressBookEntry' : EditAddressBookEntryOperationInput } |
   { 'FundExternalCanister' : FundExternalCanisterOperationInput } |
@@ -969,20 +1254,31 @@ export type RequestOperationInput = {
   { 'EditAccount' : EditAccountOperationInput } |
   { 'AddAddressBookEntry' : AddAddressBookEntryOperationInput } |
   { 'AddRequestPolicy' : AddRequestPolicyOperationInput } |
+  { 'RemoveNamedRule' : RemoveNamedRuleOperationInput } |
   { 'RemoveUserGroup' : RemoveUserGroupOperationInput } |
   { 'CallExternalCanister' : CallExternalCanisterOperationInput } |
+  { 'AddNamedRule' : AddNamedRuleOperationInput } |
+  { 'RestoreExternalCanister' : RestoreExternalCanisterOperationInput } |
   { 'AddAccount' : AddAccountOperationInput };
-export type RequestOperationType = { 'AddUserGroup' : null } |
+export type RequestOperationType = { 'RemoveAsset' : null } |
+  { 'AddUserGroup' : null } |
   { 'EditPermission' : null } |
+  { 'SnapshotExternalCanister' : null } |
+  { 'PruneExternalCanister' : null } |
+  { 'EditNamedRule' : null } |
   { 'ConfigureExternalCanister' : null } |
   { 'ChangeExternalCanister' : null } |
+  { 'MonitorExternalCanister' : null } |
   { 'AddUser' : null } |
+  { 'EditAsset' : null } |
   { 'EditUserGroup' : null } |
   { 'SetDisasterRecovery' : null } |
   { 'EditRequestPolicy' : null } |
   { 'RemoveRequestPolicy' : null } |
+  { 'AddAsset' : null } |
   { 'SystemUpgrade' : null } |
   { 'RemoveAddressBookEntry' : null } |
+  { 'SystemRestore' : null } |
   { 'CreateExternalCanister' : null } |
   { 'EditAddressBookEntry' : null } |
   { 'FundExternalCanister' : null } |
@@ -992,8 +1288,11 @@ export type RequestOperationType = { 'AddUserGroup' : null } |
   { 'EditAccount' : null } |
   { 'AddAddressBookEntry' : null } |
   { 'AddRequestPolicy' : null } |
+  { 'RemoveNamedRule' : null } |
   { 'RemoveUserGroup' : null } |
   { 'CallExternalCanister' : null } |
+  { 'AddNamedRule' : null } |
+  { 'RestoreExternalCanister' : null } |
   { 'AddAccount' : null };
 export interface RequestPolicy {
   'id' : UUID,
@@ -1012,7 +1311,8 @@ export type RequestPolicyRule = { 'Not' : RequestPolicyRule } |
   { 'AutoApproved' : null } |
   { 'AllOf' : Array<RequestPolicyRule> } |
   { 'AnyOf' : Array<RequestPolicyRule> } |
-  { 'AllowListedByMetadata' : AddressBookMetadata };
+  { 'AllowListedByMetadata' : AddressBookMetadata } |
+  { 'NamedRule' : UUID };
 export type RequestPolicyRuleInput = { 'Set' : RequestPolicyRule } |
   { 'Remove' : null };
 export interface RequestPolicyRuleResult {
@@ -1021,14 +1321,18 @@ export interface RequestPolicyRuleResult {
 }
 export type RequestResourceAction = { 'List' : null } |
   { 'Read' : ResourceId };
-export type RequestSpecifier = { 'AddUserGroup' : null } |
+export type RequestSpecifier = { 'RemoveAsset' : ResourceIds } |
+  { 'AddUserGroup' : null } |
   { 'EditPermission' : ResourceSpecifier } |
+  { 'EditNamedRule' : ResourceIds } |
   { 'ChangeExternalCanister' : ExternalCanisterId } |
   { 'AddUser' : null } |
+  { 'EditAsset' : ResourceIds } |
   { 'EditUserGroup' : ResourceIds } |
   { 'SetDisasterRecovery' : null } |
   { 'EditRequestPolicy' : ResourceIds } |
   { 'RemoveRequestPolicy' : ResourceIds } |
+  { 'AddAsset' : null } |
   { 'SystemUpgrade' : null } |
   { 'RemoveAddressBookEntry' : ResourceIds } |
   { 'CreateExternalCanister' : null } |
@@ -1040,8 +1344,10 @@ export type RequestSpecifier = { 'AddUserGroup' : null } |
   { 'EditAccount' : ResourceIds } |
   { 'AddAddressBookEntry' : null } |
   { 'AddRequestPolicy' : null } |
+  { 'RemoveNamedRule' : ResourceIds } |
   { 'RemoveUserGroup' : ResourceIds } |
   { 'CallExternalCanister' : CallExternalCanisterResourceTarget } |
+  { 'AddNamedRule' : null } |
   { 'AddAccount' : null };
 export type RequestStatus = { 'Failed' : { 'reason' : [] | [string] } } |
   { 'Approved' : null } |
@@ -1066,6 +1372,8 @@ export type Resource = { 'Request' : RequestResourceAction } |
   { 'ExternalCanister' : ExternalCanisterResourceAction } |
   { 'Account' : AccountResourceAction } |
   { 'AddressBook' : ResourceAction } |
+  { 'Asset' : ResourceAction } |
+  { 'NamedRule' : ResourceAction } |
   { 'UserGroup' : ResourceAction } |
   { 'Permission' : PermissionResourceAction } |
   { 'RequestPolicy' : ResourceAction };
@@ -1080,6 +1388,13 @@ export type ResourceIds = { 'Any' : null } |
   { 'Ids' : Array<UUID> };
 export type ResourceSpecifier = { 'Any' : null } |
   { 'Resource' : Resource };
+export interface RestoreExternalCanisterOperation {
+  'input' : RestoreExternalCanisterOperationInput,
+}
+export interface RestoreExternalCanisterOperationInput {
+  'canister_id' : Principal,
+  'snapshot_id' : string,
+}
 export interface SetDisasterRecoveryOperation {
   'committee' : [] | [DisasterRecoveryCommittee],
 }
@@ -1087,8 +1402,23 @@ export interface SetDisasterRecoveryOperationInput {
   'committee' : [] | [DisasterRecoveryCommittee],
 }
 export type Sha256Hash = string;
+export interface SnapshotExternalCanisterOperation {
+  'input' : SnapshotExternalCanisterOperationInput,
+  'snapshot_id' : [] | [string],
+}
+export interface SnapshotExternalCanisterOperationInput {
+  'force' : boolean,
+  'replace_snapshot' : [] | [string],
+  'canister_id' : Principal,
+}
 export type SortByDirection = { 'Asc' : null } |
   { 'Desc' : null };
+export interface StandardData {
+  'supported_operations' : Array<string>,
+  'supported_address_formats' : Array<string>,
+  'required_metadata_fields' : Array<string>,
+  'standard' : string,
+}
 export interface SubmitRequestApprovalInput {
   'request_id' : UUID,
   'decision' : RequestApprovalStatus,
@@ -1105,8 +1435,13 @@ export type SubmitRequestApprovalResult = {
 export interface SubnetFilter { 'subnet_type' : [] | [string] }
 export type SubnetSelection = { 'Filter' : SubnetFilter } |
   { 'Subnet' : { 'subnet' : Principal } };
+export interface SupportedBlockchain {
+  'blockchain' : string,
+  'supported_standards' : Array<StandardData>,
+}
 export interface SystemInfo {
   'disaster_recovery' : [] | [DisasterRecovery],
+  'upgrader_cycles' : [] | [bigint],
   'name' : string,
   'last_upgrade_timestamp' : TimestampRFC3339,
   'raw_rand_successful' : boolean,
@@ -1114,16 +1449,16 @@ export interface SystemInfo {
   'cycles' : bigint,
   'upgrader_id' : Principal,
   'cycle_obtain_strategy' : CycleObtainStrategy,
+  'max_upgrader_backup_snapshots' : bigint,
+  'max_station_backup_snapshots' : bigint,
 }
 export type SystemInfoResult = { 'Ok' : { 'system' : SystemInfo } } |
   { 'Err' : Error };
 export interface SystemInit {
   'name' : string,
+  'initial_config' : InitialConfig,
   'fallback_controller' : [] | [Principal],
   'upgrader' : SystemUpgraderInput,
-  'accounts' : [] | [Array<InitAccountInput>],
-  'admins' : Array<AdminInitInput>,
-  'quorum' : [] | [number],
 }
 export type SystemInstall = { 'Upgrade' : SystemUpgrade } |
   { 'Init' : SystemInit };
@@ -1131,8 +1466,18 @@ export type SystemResourceAction = { 'Upgrade' : null } |
   { 'ManageSystemInfo' : null } |
   { 'SystemInfo' : null } |
   { 'Capabilities' : null };
+export interface SystemRestoreOperation {
+  'input' : SystemRestoreOperationInput,
+}
+export interface SystemRestoreOperationInput {
+  'target' : SystemRestoreTarget,
+  'snapshot_id' : string,
+}
+export type SystemRestoreTarget = { 'RestoreUpgrader' : null } |
+  { 'RestoreStation' : null };
 export interface SystemUpgrade { 'name' : [] | [string] }
 export interface SystemUpgradeOperation {
+  'take_backup_snapshot' : [] | [boolean],
   'module_checksum' : Sha256Hash,
   'target' : SystemUpgradeTarget,
   'arg_checksum' : [] | [Sha256Hash],
@@ -1140,13 +1485,19 @@ export interface SystemUpgradeOperation {
 export interface SystemUpgradeOperationInput {
   'arg' : [] | [Uint8Array | number[]],
   'module_extra_chunks' : [] | [WasmModuleExtraChunks],
+  'take_backup_snapshot' : [] | [boolean],
   'target' : SystemUpgradeTarget,
   'module' : Uint8Array | number[],
 }
 export type SystemUpgradeTarget = { 'UpgradeUpgrader' : null } |
   { 'UpgradeStation' : null };
 export type SystemUpgraderInput = { 'Id' : Principal } |
-  { 'WasmModule' : Uint8Array | number[] };
+  {
+    'Deploy' : {
+      'initial_cycles' : [] | [bigint],
+      'wasm_module' : Uint8Array | number[],
+    }
+  };
 export type TimestampRFC3339 = string;
 export interface Transfer {
   'id' : UUID,
@@ -1170,6 +1521,7 @@ export interface TransferListItem {
 export interface TransferMetadata { 'key' : string, 'value' : string }
 export interface TransferOperation {
   'fee' : [] | [bigint],
+  'from_asset' : Asset,
   'network' : Network,
   'transfer_id' : [] | [UUID],
   'from_account' : [] | [Account],
@@ -1178,10 +1530,12 @@ export interface TransferOperation {
 export interface TransferOperationInput {
   'to' : string,
   'fee' : [] | [bigint],
+  'with_standard' : string,
   'from_account_id' : UUID,
   'metadata' : Array<TransferMetadata>,
   'network' : [] | [Network],
   'amount' : bigint,
+  'from_asset_id' : UUID,
 }
 export type TransferStatus = { 'Failed' : { 'reason' : string } } |
   { 'Processing' : { 'started_at' : TimestampRFC3339 } } |
@@ -1213,14 +1567,18 @@ export interface UserGroupCallerPrivileges {
   'can_delete' : boolean,
   'can_edit' : boolean,
 }
+export interface UserIdentityInput { 'identity' : Principal }
 export type UserPrivilege = { 'AddUserGroup' : null } |
   { 'ListRequestPolicies' : null } |
+  { 'ListNamedRules' : null } |
   { 'ListPermissions' : null } |
   { 'ListUserGroups' : null } |
   { 'AddUser' : null } |
   { 'ListUsers' : null } |
+  { 'AddAsset' : null } |
   { 'SystemUpgrade' : null } |
   { 'CreateExternalCanister' : null } |
+  { 'ListAssets' : null } |
   { 'ManageSystemInfo' : null } |
   { 'AddAddressBookEntry' : null } |
   { 'ListAccounts' : null } |
@@ -1230,6 +1588,7 @@ export type UserPrivilege = { 'AddUserGroup' : null } |
   { 'ListRequests' : null } |
   { 'CallAnyExternalCanister' : null } |
   { 'SystemInfo' : null } |
+  { 'AddNamedRule' : null } |
   { 'Capabilities' : null } |
   { 'AddAccount' : null };
 export type UserResourceAction = { 'List' : null } |
@@ -1249,7 +1608,15 @@ export interface WasmModuleExtraChunks {
   'extra_chunks_key' : string,
 }
 export interface _SERVICE {
-  'canister_status' : ActorMethod<[CanisterStatusInput], CanisterStatusResult>,
+  'cancel_request' : ActorMethod<[CancelRequestInput], CancelRequestResult>,
+  'canister_snapshots' : ActorMethod<
+    [CanisterSnapshotsInput],
+    CanisterSnapshotsResult
+  >,
+  'canister_status' : ActorMethod<
+    [CanisterStatusInput],
+    CanisterStatusResponse
+  >,
   'capabilities' : ActorMethod<[], CapabilitiesResult>,
   'create_request' : ActorMethod<[CreateRequestInput], CreateRequestResult>,
   'fetch_account_balances' : ActorMethod<
@@ -1261,6 +1628,7 @@ export interface _SERVICE {
     [GetAddressBookEntryInput],
     GetAddressBookEntryResult
   >,
+  'get_asset' : ActorMethod<[GetAssetInput], GetAssetResult>,
   'get_external_canister' : ActorMethod<
     [GetExternalCanisterInput],
     GetExternalCanisterResult
@@ -1269,6 +1637,7 @@ export interface _SERVICE {
     [GetExternalCanisterFiltersInput],
     GetExternalCanisterFiltersResult
   >,
+  'get_named_rule' : ActorMethod<[GetNamedRuleInput], GetNamedRuleResult>,
   'get_next_approvable_request' : ActorMethod<
     [GetNextApprovableRequestInput],
     GetNextApprovableRequestResult
@@ -1293,10 +1662,12 @@ export interface _SERVICE {
     [ListAddressBookEntriesInput],
     ListAddressBookEntriesResult
   >,
+  'list_assets' : ActorMethod<[ListAssetsInput], ListAssetsResult>,
   'list_external_canisters' : ActorMethod<
     [ListExternalCanistersInput],
     ListExternalCanistersResult
   >,
+  'list_named_rules' : ActorMethod<[ListNamedRulesInput], ListNamedRulesResult>,
   'list_notifications' : ActorMethod<
     [ListNotificationsInput],
     ListNotificationsResult

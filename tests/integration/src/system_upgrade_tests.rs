@@ -1,19 +1,24 @@
 use crate::setup::{get_canister_wasm, setup_new_env, WALLET_ADMIN_USER};
 use crate::utils::{
     execute_request, execute_request_with_extra_ticks, get_core_canister_health_status,
-    get_system_info, upload_canister_chunks_to_asset_canister,
+    get_request, get_system_info, submit_delayed_request_raw, submit_request, try_get_request,
+    upload_canister_chunks_to_asset_canister, wait_for_request, wait_for_request_with_extra_ticks,
 };
 use crate::{CanisterIds, TestEnv};
 use candid::{Encode, Principal};
+use ic_management_canister_types::CanisterIdRecord;
 use orbit_essentials::api::ApiResult;
+use orbit_essentials::utils::rfc3339_to_timestamp;
 use pocket_ic::{update_candid_as, PocketIc};
 use station_api::{
-    HealthStatus, NotifyFailedStationUpgradeInput, RequestOperationInput, RequestStatusDTO,
-    SystemInstall, SystemUpgrade, SystemUpgradeOperationInput, SystemUpgradeTargetDTO,
+    HealthStatus, ManageSystemInfoOperationInput, NotifyFailedStationUpgradeInput,
+    RequestOperationInput, RequestStatusDTO, SystemInstall, SystemRestoreOperationInput,
+    SystemRestoreTargetDTO, SystemUpgrade, SystemUpgradeOperationInput, SystemUpgradeTargetDTO,
 };
+use std::time::Duration;
 use upgrader_api::InitArg;
 
-const EXTRA_TICKS: u64 = 200;
+pub(crate) const STATION_UPGRADE_EXTRA_TICKS: u64 = 200;
 
 fn do_successful_station_upgrade(
     env: &PocketIc,
@@ -33,7 +38,7 @@ fn do_successful_station_upgrade(
         WALLET_ADMIN_USER,
         canister_ids.station,
         station_upgrade_operation.clone(),
-        EXTRA_TICKS,
+        STATION_UPGRADE_EXTRA_TICKS,
     )
     .unwrap();
 
@@ -52,7 +57,7 @@ fn do_successful_station_upgrade(
         WALLET_ADMIN_USER,
         canister_ids.station,
         station_upgrade_operation,
-        EXTRA_TICKS,
+        STATION_UPGRADE_EXTRA_TICKS,
     )
     .unwrap();
 
@@ -104,7 +109,7 @@ fn do_failed_system_upgrade(
         WALLET_ADMIN_USER,
         canister_ids.station,
         system_upgrade_operation,
-        EXTRA_TICKS,
+        STATION_UPGRADE_EXTRA_TICKS,
     )
     .unwrap_err()
     .unwrap();
@@ -138,6 +143,7 @@ fn failed_station_upgrade() {
             module: vec![],
             module_extra_chunks: None,
             arg: None,
+            take_backup_snapshot: None,
         });
 
     do_failed_system_upgrade(
@@ -166,6 +172,7 @@ fn too_many_chunks() {
             module: base_chunk,
             module_extra_chunks: Some(module_extra_chunks),
             arg: None,
+            take_backup_snapshot: None,
         });
 
     do_failed_system_upgrade(
@@ -192,6 +199,7 @@ fn too_large_wasm() {
             module: base_chunk,
             module_extra_chunks: Some(module_extra_chunks),
             arg: None,
+            take_backup_snapshot: None,
         });
 
     do_failed_system_upgrade(
@@ -241,6 +249,7 @@ fn system_upgrade_from_chunks() {
                 module: base_chunk.to_owned(),
                 module_extra_chunks: Some(module_extra_chunks.clone()),
                 arg: Some(arg_bytes.clone()),
+                take_backup_snapshot: None,
             });
 
         // successful upgrade
@@ -262,6 +271,7 @@ fn system_upgrade_from_chunks() {
                 module: base_chunk.to_owned(),
                 module_extra_chunks: Some(module_extra_chunks.clone()),
                 arg: Some(arg_bytes),
+                take_backup_snapshot: None,
             });
 
         // failed upgrade
@@ -328,4 +338,526 @@ fn unauthorized_notify_failed_station_upgrade() {
         .message
         .unwrap()
         .contains("No station upgrade request is processing."));
+}
+
+#[test]
+fn delayed_system_upgrade() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    // upload chunks to asset canister
+    let canister_wasm = get_canister_wasm("upgrader").to_vec();
+    let (base_chunk, module_extra_chunks) =
+        upload_canister_chunks_to_asset_canister(&env, canister_wasm, 50_000);
+
+    // create system upgrade request from chunks
+    let upgrader_init_arg = InitArg {
+        target_canister: canister_ids.station,
+    };
+    let upgrader_init_arg_bytes = Encode!(&upgrader_init_arg).unwrap();
+    let system_upgrade_operation =
+        RequestOperationInput::SystemUpgrade(SystemUpgradeOperationInput {
+            target: SystemUpgradeTargetDTO::UpgradeUpgrader,
+            module: base_chunk.to_owned(),
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Some(upgrader_init_arg_bytes),
+            take_backup_snapshot: None,
+        });
+
+    let delay = Duration::from_secs(30 * 24 * 60 * 60);
+    let expected_scheduled_at: u64 = (env.get_time() + delay).as_nanos_since_unix_epoch();
+    let mut request = submit_delayed_request_raw(
+        &env,
+        WALLET_ADMIN_USER,
+        canister_ids.station,
+        system_upgrade_operation,
+        delay,
+    )
+    .unwrap()
+    .0
+    .unwrap()
+    .request;
+
+    match request.status {
+        RequestStatusDTO::Approved => (),
+        _ => panic!("Unexpected request status: {:?}", request.status),
+    };
+
+    loop {
+        request = get_request(&env, WALLET_ADMIN_USER, canister_ids.station, request);
+        if let RequestStatusDTO::Scheduled { ref scheduled_at } = request.status {
+            assert!(rfc3339_to_timestamp(scheduled_at) >= expected_scheduled_at);
+            break;
+        };
+        env.advance_time(Duration::from_secs(1));
+        env.tick();
+    }
+
+    env.advance_time(delay);
+
+    wait_for_request(&env, WALLET_ADMIN_USER, canister_ids.station, request).unwrap();
+}
+
+#[test]
+fn system_restore() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    let system_info = get_system_info(&env, WALLET_ADMIN_USER, canister_ids.station);
+    let upgrader_id = system_info.upgrader_id;
+
+    for target in [
+        SystemRestoreTargetDTO::RestoreStation,
+        SystemRestoreTargetDTO::RestoreUpgrader,
+    ] {
+        let target_canister_id = match target {
+            SystemRestoreTargetDTO::RestoreStation => canister_ids.station,
+            SystemRestoreTargetDTO::RestoreUpgrader => upgrader_id,
+        };
+        let controller = match target {
+            SystemRestoreTargetDTO::RestoreStation => upgrader_id,
+            SystemRestoreTargetDTO::RestoreUpgrader => canister_ids.station,
+        };
+        let snapshot = env
+            .take_canister_snapshot(target_canister_id, Some(controller), None)
+            .unwrap();
+
+        let system_restore = RequestOperationInput::SystemRestore(SystemRestoreOperationInput {
+            target: target.clone(),
+            snapshot_id: hex::encode(&snapshot.id),
+        });
+
+        match target {
+            SystemRestoreTargetDTO::RestoreStation => {
+                let system_restore_request = submit_request(
+                    &env,
+                    WALLET_ADMIN_USER,
+                    canister_ids.station,
+                    system_restore,
+                );
+                // wait until the station is restored (to a state before the restore request) at which point the restore request is not found anymore
+                loop {
+                    env.tick();
+                    env.advance_time(Duration::from_secs(5));
+                    match try_get_request(
+                        &env,
+                        WALLET_ADMIN_USER,
+                        canister_ids.station,
+                        system_restore_request.clone(),
+                    ) {
+                        Err(err) => assert!(
+                            err.reject_message.contains(&format!(
+                                "Canister {} is not running",
+                                canister_ids.station
+                            )) || err
+                                .reject_message
+                                .contains(&format!("Canister {} is stopped", canister_ids.station))
+                        ),
+                        Ok(Err(err)) => {
+                            assert_eq!(err.code, "NOT_FOUND");
+                            break;
+                        }
+                        Ok(Ok(_)) => (),
+                    }
+                }
+            }
+            SystemRestoreTargetDTO::RestoreUpgrader => {
+                execute_request(
+                    &env,
+                    WALLET_ADMIN_USER,
+                    canister_ids.station,
+                    system_restore,
+                )
+                .unwrap();
+            }
+        };
+    }
+}
+
+#[test]
+fn failed_system_restore() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    for target in [
+        SystemRestoreTargetDTO::RestoreStation,
+        SystemRestoreTargetDTO::RestoreUpgrader,
+    ] {
+        // providing an invalid snapshot id of length 1
+        let system_restore = RequestOperationInput::SystemRestore(SystemRestoreOperationInput {
+            target: target.clone(),
+            snapshot_id: hex::encode([42]),
+        });
+
+        let system_restore_request = submit_request(
+            &env,
+            WALLET_ADMIN_USER,
+            canister_ids.station,
+            system_restore,
+        );
+
+        let status = wait_for_request_with_extra_ticks(
+            &env,
+            WALLET_ADMIN_USER,
+            canister_ids.station,
+            system_restore_request,
+            STATION_UPGRADE_EXTRA_TICKS,
+        )
+        .unwrap_err()
+        .unwrap();
+
+        match status {
+            RequestStatusDTO::Failed { reason } => {
+                assert!(reason.unwrap().contains("IC0408: Payload deserialization error: InvalidLength(\"Invalid snapshot ID length: provided 1, minumum length expected 37.\""));
+            }
+            _ => panic!("Unexpected request status: {:?}", status),
+        };
+    }
+}
+
+#[test]
+fn backup_snapshot() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    let system_info = get_system_info(&env, WALLET_ADMIN_USER, canister_ids.station);
+    let upgrader_id = system_info.upgrader_id;
+
+    let station_init_arg = SystemInstall::Upgrade(SystemUpgrade { name: None });
+    let station_init_arg_bytes = Encode!(&station_init_arg).unwrap();
+    let upgrader_init_arg = InitArg {
+        target_canister: canister_ids.station,
+    };
+    let upgrader_init_arg_bytes = Encode!(&upgrader_init_arg).unwrap();
+
+    let upgrade = |system_upgrade_operation_input: SystemUpgradeOperationInput| {
+        let extra_ticks = match system_upgrade_operation_input.target {
+            SystemUpgradeTargetDTO::UpgradeStation => STATION_UPGRADE_EXTRA_TICKS,
+            SystemUpgradeTargetDTO::UpgradeUpgrader => 0,
+        };
+        execute_request_with_extra_ticks(
+            &env,
+            WALLET_ADMIN_USER,
+            canister_ids.station,
+            RequestOperationInput::SystemUpgrade(system_upgrade_operation_input),
+            extra_ticks,
+        )
+    };
+
+    let snapshot = |target: &SystemUpgradeTargetDTO| -> Option<Vec<u8>> {
+        let (canister_id, caller) = match target {
+            SystemUpgradeTargetDTO::UpgradeStation => (canister_ids.station, upgrader_id),
+            SystemUpgradeTargetDTO::UpgradeUpgrader => (upgrader_id, canister_ids.station),
+        };
+        let snapshots: Vec<_> = env
+            .list_canister_snapshots(canister_id, Some(caller))
+            .unwrap();
+        if snapshots.is_empty() {
+            None
+        } else {
+            assert_eq!(snapshots.len(), 1);
+            Some(snapshots[0].id.clone())
+        }
+    };
+
+    let check_snapshots = |target: &SystemUpgradeTargetDTO, snapshot_id: Option<Vec<u8>>| {
+        match target {
+            SystemUpgradeTargetDTO::UpgradeStation => {
+                let snapshots_via_upgrader =
+                    update_candid_as::<_, (ApiResult<Vec<upgrader_api::Snapshot>>,)>(
+                        &env,
+                        upgrader_id,
+                        WALLET_ADMIN_USER,
+                        "canister_snapshots",
+                        (),
+                    )
+                    .unwrap()
+                    .0
+                    .unwrap();
+                if let Some(snapshot_id) = snapshot_id {
+                    assert_eq!(snapshots_via_upgrader.len(), 1);
+                    assert_eq!(
+                        snapshots_via_upgrader[0].snapshot_id,
+                        hex::encode(snapshot_id)
+                    );
+                } else {
+                    assert!(snapshots_via_upgrader.is_empty());
+                }
+            }
+            SystemUpgradeTargetDTO::UpgradeUpgrader => {
+                let snapshots_via_station =
+                    update_candid_as::<_, (ApiResult<Vec<station_api::Snapshot>>,)>(
+                        &env,
+                        canister_ids.station,
+                        WALLET_ADMIN_USER,
+                        "canister_snapshots",
+                        (CanisterIdRecord {
+                            canister_id: upgrader_id,
+                        },),
+                    )
+                    .unwrap()
+                    .0
+                    .unwrap();
+                if let Some(snapshot_id) = snapshot_id {
+                    assert_eq!(snapshots_via_station.len(), 1);
+                    assert_eq!(
+                        snapshots_via_station[0].snapshot_id,
+                        hex::encode(snapshot_id)
+                    );
+                } else {
+                    assert!(snapshots_via_station.is_empty());
+                }
+            }
+        };
+    };
+
+    for (target, arg_bytes, canister_name, chunk_len) in [
+        (
+            SystemUpgradeTargetDTO::UpgradeStation,
+            station_init_arg_bytes,
+            "station",
+            500_000,
+        ),
+        (
+            SystemUpgradeTargetDTO::UpgradeUpgrader,
+            upgrader_init_arg_bytes,
+            "upgrader",
+            50_000,
+        ),
+    ] {
+        // upload chunks to asset canister
+        let canister_wasm = get_canister_wasm(canister_name).to_vec();
+        let (base_chunk, module_extra_chunks) =
+            upload_canister_chunks_to_asset_canister(&env, canister_wasm, chunk_len);
+
+        // create system upgrade request operation input taking a backup snapshot
+        let mut system_upgrade_operation_input = SystemUpgradeOperationInput {
+            target: target.clone(),
+            module: base_chunk.to_owned(),
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Some(arg_bytes),
+            take_backup_snapshot: Some(true),
+        };
+
+        // there should be no snapshots yet
+        check_snapshots(&target, None);
+
+        upgrade(system_upgrade_operation_input.clone()).unwrap();
+
+        // a backup snapshot should have been taken
+        let backup_snapshot_id = snapshot(&target).unwrap();
+        check_snapshots(&target, Some(backup_snapshot_id.clone()));
+
+        // create system upgrade request operation input taking no backup snapshot
+        system_upgrade_operation_input.take_backup_snapshot = None;
+
+        upgrade(system_upgrade_operation_input.clone()).unwrap();
+
+        // no new backup snapshot should have been taken
+        check_snapshots(&target, Some(backup_snapshot_id.clone()));
+
+        // create system upgrade request operation input taking a backup snapshot
+        system_upgrade_operation_input.take_backup_snapshot = Some(true);
+
+        upgrade(system_upgrade_operation_input.clone()).unwrap();
+
+        // a new backup snapshot should have been taken, replacing the previous backup snapshot
+        let new_backup_snapshot_id = snapshot(&target).unwrap();
+        assert_ne!(backup_snapshot_id, new_backup_snapshot_id);
+        check_snapshots(&target, Some(new_backup_snapshot_id.clone()));
+
+        // create system upgrade request operation input taking a backup snapshot and containing an invalid WASM
+        system_upgrade_operation_input.module = vec![];
+        system_upgrade_operation_input.module_extra_chunks = None;
+
+        let status = upgrade(system_upgrade_operation_input)
+            .unwrap_err()
+            .unwrap();
+        match status {
+            RequestStatusDTO::Failed { reason } => {
+                assert!(reason.unwrap().contains("Canister's Wasm module is not valid: Failed to decode wasm module: unsupported canister module format."));
+            }
+            _ => panic!("Unexpected request status: {:?}", status),
+        };
+
+        // a new backup snapshot should have been taken, replacing the previous backup snapshot
+        let newest_backup_snapshot_id = snapshot(&target).unwrap();
+        assert_ne!(new_backup_snapshot_id, newest_backup_snapshot_id);
+        check_snapshots(&target, Some(newest_backup_snapshot_id.clone()));
+    }
+}
+
+#[test]
+fn unauthorized_set_max_backup_snapshots() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    let system_info = get_system_info(&env, WALLET_ADMIN_USER, canister_ids.station);
+    let upgrader_id = system_info.upgrader_id;
+
+    // Calling `set_max_backup_snapshots` on behalf of the admin user or anonymous principal fails in authorization (only the station canister can call `set_max_backup_snapshots`).
+    for caller in [WALLET_ADMIN_USER, Principal::anonymous()] {
+        let max_backup_snapshots: u64 = 5;
+        let res: (Result<(), String>,) = update_candid_as(
+            &env,
+            upgrader_id,
+            caller,
+            "set_max_backup_snapshots",
+            ((max_backup_snapshots),),
+        )
+        .unwrap();
+        let err = res.0.unwrap_err();
+        assert_eq!(
+            err,
+            format!(
+                "Only the target canister {} is authorized to call `set_max_backup_snapshots`.",
+                canister_ids.station
+            )
+        );
+    }
+}
+
+#[test]
+fn set_max_backup_snapshots() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    let system_info = get_system_info(&env, WALLET_ADMIN_USER, canister_ids.station);
+    let upgrader_id = system_info.upgrader_id;
+
+    let station_init_arg = SystemInstall::Upgrade(SystemUpgrade { name: None });
+    let station_init_arg_bytes = Encode!(&station_init_arg).unwrap();
+    let upgrader_init_arg = InitArg {
+        target_canister: canister_ids.station,
+    };
+    let upgrader_init_arg_bytes = Encode!(&upgrader_init_arg).unwrap();
+
+    let upgrade = |system_upgrade_operation_input: SystemUpgradeOperationInput| {
+        let extra_ticks = match system_upgrade_operation_input.target {
+            SystemUpgradeTargetDTO::UpgradeStation => STATION_UPGRADE_EXTRA_TICKS,
+            SystemUpgradeTargetDTO::UpgradeUpgrader => 0,
+        };
+        execute_request_with_extra_ticks(
+            &env,
+            WALLET_ADMIN_USER,
+            canister_ids.station,
+            RequestOperationInput::SystemUpgrade(system_upgrade_operation_input),
+            extra_ticks,
+        )
+    };
+
+    let snapshots = |target: &SystemUpgradeTargetDTO| -> Vec<Vec<u8>> {
+        let (canister_id, caller) = match target {
+            SystemUpgradeTargetDTO::UpgradeStation => (canister_ids.station, upgrader_id),
+            SystemUpgradeTargetDTO::UpgradeUpgrader => (upgrader_id, canister_ids.station),
+        };
+        let snapshots: Vec<_> = env
+            .list_canister_snapshots(canister_id, Some(caller))
+            .unwrap();
+        snapshots.into_iter().map(|s| s.id).collect()
+    };
+
+    let set_max_backup_snapshots = |target: &SystemUpgradeTargetDTO, max_backup_snapshots: u64| {
+        let manage_system_info_operation_input = match target {
+            SystemUpgradeTargetDTO::UpgradeStation => ManageSystemInfoOperationInput {
+                cycle_obtain_strategy: None,
+                name: None,
+                max_station_backup_snapshots: Some(max_backup_snapshots),
+                max_upgrader_backup_snapshots: None,
+            },
+            SystemUpgradeTargetDTO::UpgradeUpgrader => ManageSystemInfoOperationInput {
+                cycle_obtain_strategy: None,
+                name: None,
+                max_station_backup_snapshots: None,
+                max_upgrader_backup_snapshots: Some(max_backup_snapshots),
+            },
+        };
+        execute_request(
+            &env,
+            WALLET_ADMIN_USER,
+            canister_ids.station,
+            RequestOperationInput::ManageSystemInfo(manage_system_info_operation_input),
+        )
+        .unwrap();
+    };
+
+    for (target, arg_bytes, canister_name, chunk_len) in [
+        (
+            SystemUpgradeTargetDTO::UpgradeStation,
+            station_init_arg_bytes,
+            "station",
+            500_000,
+        ),
+        (
+            SystemUpgradeTargetDTO::UpgradeUpgrader,
+            upgrader_init_arg_bytes,
+            "upgrader",
+            50_000,
+        ),
+    ] {
+        // upload chunks to asset canister
+        let canister_wasm = get_canister_wasm(canister_name).to_vec();
+        let (base_chunk, module_extra_chunks) =
+            upload_canister_chunks_to_asset_canister(&env, canister_wasm, chunk_len);
+
+        // create system upgrade request operation input taking a backup snapshot
+        let system_upgrade_operation_input = SystemUpgradeOperationInput {
+            target: target.clone(),
+            module: base_chunk.to_owned(),
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Some(arg_bytes),
+            take_backup_snapshot: Some(true),
+        };
+
+        // set the maximum number of backup snapshots to `initial_max_backup_snapshots`.
+        let initial_max_backup_snapshots = 8;
+        set_max_backup_snapshots(&target, initial_max_backup_snapshots);
+
+        // there should be no snapshots yet
+        assert!(snapshots(&target).is_empty());
+
+        // perform `initial_upgrades` each taking a backup snapshot
+        let initial_upgrades = 3;
+        for _ in 0..initial_upgrades {
+            upgrade(system_upgrade_operation_input.clone()).unwrap();
+        }
+        assert_eq!(snapshots(&target).len() as u64, initial_upgrades);
+
+        // set the maximum number of backup snapshots to `max_backup_snapshots`.
+        let max_backup_snapshots = 5;
+        set_max_backup_snapshots(&target, max_backup_snapshots);
+        assert_eq!(snapshots(&target).len() as u64, initial_upgrades);
+
+        // perform `max_backup_snapshots - initial_upgrades` additional upgrades
+        assert!(initial_upgrades < max_backup_snapshots);
+        for _ in 0..(max_backup_snapshots - initial_upgrades) {
+            upgrade(system_upgrade_operation_input.clone()).unwrap();
+        }
+        assert_eq!(snapshots(&target).len() as u64, max_backup_snapshots);
+
+        // perform one more upgrade
+        upgrade(system_upgrade_operation_input.clone()).unwrap();
+
+        // there should still be `max_backup_snapshots`
+        assert_eq!(snapshots(&target).len() as u64, max_backup_snapshots);
+
+        // set the maximum number of backup snapshots to `new_max_backup_snapshots`.
+        let new_max_backup_snapshots = 2;
+        set_max_backup_snapshots(&target, new_max_backup_snapshots);
+
+        // there should be only `new_max_backup_snapshots` left
+        assert_eq!(snapshots(&target).len() as u64, new_max_backup_snapshots);
+
+        // set the maximum number of backup snapshots to zero
+        set_max_backup_snapshots(&target, 0);
+
+        // there should be no more backup snapshots left
+        assert!(snapshots(&target).is_empty());
+    }
 }

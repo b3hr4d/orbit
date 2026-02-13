@@ -91,6 +91,30 @@ export const mapRequestSpecifierToEnum = (specifier: RequestSpecifier): RequestS
     return RequestSpecifierEnum.SetDisasterRecovery;
   }
 
+  if (variantIs(specifier, 'AddAsset')) {
+    return RequestSpecifierEnum.AddAsset;
+  }
+
+  if (variantIs(specifier, 'EditAsset')) {
+    return RequestSpecifierEnum.EditAsset;
+  }
+
+  if (variantIs(specifier, 'RemoveAsset')) {
+    return RequestSpecifierEnum.RemoveAsset;
+  }
+
+  if (variantIs(specifier, 'AddNamedRule')) {
+    return RequestSpecifierEnum.AddNamedRule;
+  }
+
+  if (variantIs(specifier, 'EditNamedRule')) {
+    return RequestSpecifierEnum.EditNamedRule;
+  }
+
+  if (variantIs(specifier, 'RemoveNamedRule')) {
+    return RequestSpecifierEnum.RemoveNamedRule;
+  }
+
   return unreachable(specifier);
 };
 

@@ -1,3 +1,256 @@
+## 0.6.1 (2025-07-28)
+
+
+### 🩹 Fixes
+
+- **ui:** degraded experience when failed to load system info ([#585](https://github.com/dfinity/orbit/pull/585))
+
+- **wallet:** remove invalid check for new controller input ([#593](https://github.com/dfinity/orbit/pull/593))
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- Kepler Vital
+
+## 0.6.0 (2025-06-02)
+
+
+### 🚀 Features
+
+- **station:** configurable station initialization ([#482](https://github.com/dfinity/orbit/pull/482))
+
+- **upgrader:** new endpoint to list station snapshots ([#545](https://github.com/dfinity/orbit/pull/545))
+
+- **station:** update Request::last_modification_timestamp on adding approval ([#576](https://github.com/dfinity/orbit/pull/576))
+
+- **wallet:** DR UI ([#557](https://github.com/dfinity/orbit/pull/557))
+
+
+### 🩹 Fixes
+
+- **station:** bump ic-cdk to fix canister_status parsing ([#538](https://github.com/dfinity/orbit/pull/538))
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- Kepler Vital
+- mraszyk @mraszyk
+- olaszakos
+
+## 0.5.1 (2025-03-12)
+
+
+### 🩹 Fixes
+
+- **wallet:** add aggregator to CSP ([#530](https://github.com/dfinity/orbit/pull/530))
+
+- **CI:** use rustup 1.27.1 for docker build ([#532](https://github.com/dfinity/orbit/pull/532))
+
+
+### ❤️  Thank You
+
+- olaszakos
+
+## 0.5.0 (2025-03-03)
+
+
+### 🚀 Features
+
+- **control-panel:** public beta ([#519](https://github.com/dfinity/orbit/pull/519))
+
+- **marketing:** marketing site home page ([#500](https://github.com/dfinity/orbit/pull/500))
+
+- **docs:** initial docs portal ([#493](https://github.com/dfinity/orbit/pull/493))
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- Kepler Vital
+- olaszakos
+
+## 0.4.0 (2025-02-26)
+
+
+### 🚀 Features
+
+- **wallet:** searchable address book; pick from address book at transfer ([#470](https://github.com/dfinity/orbit/pull/470))
+
+- **wallet:** extend asset creation dialog with ck/sns tokens ([#480](https://github.com/dfinity/orbit/pull/480))
+
+- **wallet:** requesters can cancel their requests ([#481](https://github.com/dfinity/orbit/pull/481))
+
+- **station:** enable station top up from the cycles ledger balance ([#472](https://github.com/dfinity/orbit/pull/472))
+
+- **station:** support named rules ([#483](https://github.com/dfinity/orbit/pull/483))
+
+- **control-panel:** reduce initial station and upgrader cycles to 1T ([#485](https://github.com/dfinity/orbit/pull/485))
+
+- **docs:** docs portal ([#486](https://github.com/dfinity/orbit/pull/486))
+
+- **wallet:** Approval Policy aka Named Rules UI ([#488](https://github.com/dfinity/orbit/pull/488))
+
+- **station:** updated permission management ux ([#491](https://github.com/dfinity/orbit/pull/491))
+
+- **apps:** init marketing project ([#498](https://github.com/dfinity/orbit/pull/498))
+
+- **wallet:** updated branding ([#497](https://github.com/dfinity/orbit/pull/497))
+
+
+### 🩹 Fixes
+
+- **ci:** install CMC in Orbit local deployment ([#465](https://github.com/dfinity/orbit/pull/465))
+
+- **ci:** build and CI issues ([#467](https://github.com/dfinity/orbit/pull/467))
+
+- **station:** docker build ([#492](https://github.com/dfinity/orbit/pull/492))
+
+- **station:** security issue 42 ([#505](https://github.com/dfinity/orbit/pull/505))
+
+- **wallet:** security issue 36, 37, 38, 39, 40, 41 ([#503](https://github.com/dfinity/orbit/pull/503))
+
+- **station:** security issue 19, 54 ([#509](https://github.com/dfinity/orbit/pull/509))
+
+- **station:** security issue 45 ([#510](https://github.com/dfinity/orbit/pull/510))
+
+- **wallet:** update approval rules permission locales; add permission check for tabs ([#514](https://github.com/dfinity/orbit/pull/514))
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- Kepler Vital
+- mraszyk @mraszyk
+- olaszakos
+
+## 0.3.0 (2024-12-17)
+
+
+### 🚀 Features
+
+- **wallet:** add user groups to users page ([#454](https://github.com/dfinity/orbit/pull/454))
+
+- **wallet:** add request URL to export; copy request URL button ([#453](https://github.com/dfinity/orbit/pull/453))
+
+- **station:** display station and upgrader cycle balance on Administration page ([#457](https://github.com/dfinity/orbit/pull/457))
+
+
+### 🩹 Fixes
+
+- **wallet:** update lockfile ([#459](https://github.com/dfinity/orbit/pull/459))
+
+- **wallet:** fix typo in template ([#462](https://github.com/dfinity/orbit/pull/462))
+
+- **wallet:** fix CSV upload ([#463](https://github.com/dfinity/orbit/pull/463))
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- olaszakos
+
+## 0.2.0 (2024-12-03)
+
+
+### 🚀 Features
+
+- **wallet:** show upgrader ID on station info card ([#446](https://github.com/dfinity/orbit/pull/446))
+
+- **station:** external canister snapshots ([#429](https://github.com/dfinity/orbit/pull/429))
+
+- **station:** monitor external canisters ([#416](https://github.com/dfinity/orbit/pull/416))
+
+- **wallet:** search for address on address book page ([#450](https://github.com/dfinity/orbit/pull/450))
+
+
+### 🩹 Fixes
+
+- **wallet:** fix request export order ([#449](https://github.com/dfinity/orbit/pull/449))
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- mraszyk @mraszyk
+- olaszakos
+
+## 0.1.1 (2024-11-28)
+
+
+### 🩹 Fixes
+
+- **wallet:** add new opt candid metadata field ([#447](https://github.com/dfinity/orbit/pull/447))
+
+
+### ❤️  Thank You
+
+- Kepler Vital
+
+## 0.1.0 (2024-11-27)
+
+
+### 🚀 Features
+
+- ⚠️  **station:** multi chain support ([#374](https://github.com/dfinity/orbit/pull/374))
+
+
+### 🩹 Fixes
+
+- **control-panel:** fix initial station deploy ([#441](https://github.com/dfinity/orbit/pull/441))
+
+- **wallet:** fix semver compatibility check ([#442](https://github.com/dfinity/orbit/pull/442))
+
+
+### ⚠️  Breaking Changes
+
+- ⚠️  **station:** multi chain support ([#374](https://github.com/dfinity/orbit/pull/374))
+
+### ❤️  Thank You
+
+- Kepler Vital
+- olaszakos
+
+## 0.0.2-alpha.15 (2024-11-22)
+
+
+### 🩹 Fixes
+
+- **wallet:** transfer requests page should only show transfers ([#438](https://github.com/dfinity/orbit/pull/438))
+
+
+### ❤️  Thank You
+
+- Kepler Vital
+
+## 0.0.2-alpha.14 (2024-11-22)
+
+
+### 🚀 Features
+
+- **station:** add metadata to external canisters ([#418](https://github.com/dfinity/orbit/pull/418))
+
+- **station:** add expiration dt during request creation ([#424](https://github.com/dfinity/orbit/pull/424))
+
+- **station:** requestor can cancel pending requests ([#426](https://github.com/dfinity/orbit/pull/426))
+
+- **enable:** wallet ui accepts wasm chunk store from registry ([#433](https://github.com/dfinity/orbit/pull/433))
+
+- **wallet:** add close btn to error dialog ([#434](https://github.com/dfinity/orbit/pull/434))
+
+
+### 🩹 Fixes
+
+- **station:** add missing metadata field from UI ([#427](https://github.com/dfinity/orbit/pull/427))
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- Kepler Vital
+- olaszakos
+
 ## 0.0.2-alpha.13 (2024-10-28)
 
 

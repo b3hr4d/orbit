@@ -1,15 +1,20 @@
 import { Actor, ActorSubclass, HttpAgent } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
+import logger from '~/core/logger.core';
 import { idlFactory } from '~/generated/station';
 import {
-  AccountBalance,
+  Account,
+  AccountCallerPrivileges,
   AddAccountOperationInput,
   AddAddressBookEntryOperationInput,
+  AddAssetOperationInput,
+  AddNamedRuleOperationInput,
   AddRequestPolicyOperationInput,
   AddUserGroupOperationInput,
   AddUserOperationInput,
+  CancelRequestInput,
   CanisterMethod,
-  CanisterStatusResult,
+  CanisterSnapshotsResult,
   Capabilities,
   ChangeExternalCanisterOperationInput,
   ConfigureExternalCanisterOperationKind,
@@ -20,18 +25,24 @@ import {
   DisasterRecoveryCommittee,
   EditAccountOperationInput,
   EditAddressBookEntryOperationInput,
+  EditAssetOperationInput,
+  EditNamedRuleOperationInput,
   EditPermissionOperationInput,
   EditRequestPolicyOperationInput,
   EditUserGroupOperationInput,
   EditUserOperationInput,
   FetchAccountBalancesInput,
+  FetchAccountBalancesResult,
   FundExternalCanisterOperationInput,
   GetAccountInput,
   GetAccountResult,
   GetAddressBookEntryInput,
   GetAddressBookEntryResult,
+  GetAssetInput,
+  GetAssetResult,
   GetExternalCanisterFiltersResult,
   GetExternalCanisterResult,
+  GetNamedRuleResult,
   GetNextApprovableRequestResult,
   GetPermissionInput,
   GetPermissionResult,
@@ -46,7 +57,9 @@ import {
   ListAccountTransfersInput,
   ListAccountsResult,
   ListAddressBookEntriesResult,
+  ListAssetsResult,
   ListExternalCanistersResult,
+  ListNamedRulesResult,
   ListNotificationsInput,
   ListPermissionsInput,
   ListPermissionsResult,
@@ -57,8 +70,10 @@ import {
   ListUsersResult,
   ManageSystemInfoOperationInput,
   MarkNotificationsReadInput,
+  MonitorExternalCanisterOperationInput,
   Notification,
   PaginationInput,
+  RemoveAssetOperationInput,
   RemoveUserGroupOperationInput,
   Request,
   SubmitRequestApprovalInput,
@@ -72,16 +87,22 @@ import {
   UserPrivilege,
   UserStatus,
   _SERVICE,
+  CanisterStatusResponse,
 } from '~/generated/station/station.did';
 import { ExtractOk } from '~/types/helper.types';
 import {
   GetNextApprovableRequestArgs,
   ListAccountsArgs,
   ListAddressBookEntriesArgs,
+  ListAssetsArgs,
   ListExternalCanistersArgs,
   ListRequestsArgs,
 } from '~/types/station.types';
-import { transformIdlWithOnlyVerifiedCalls, variantIs } from '~/utils/helper.utils';
+import {
+  fetchCanisterControllers,
+  transformIdlWithOnlyVerifiedCalls,
+  variantIs,
+} from '~/utils/helper.utils';
 
 export class StationService {
   // This actor is modified to only perform calls that can be verified, such as update calls that go through consensus.
@@ -253,9 +274,12 @@ export class StationService {
   async removeUserGroup(input: RemoveUserGroupOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
       operation: { RemoveUserGroup: input },
+      deduplication_key: [],
+      tags: [],
     });
 
     if ('Err' in result) {
@@ -268,9 +292,12 @@ export class StationService {
   async addUserGroup(input: AddUserGroupOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
       operation: { AddUserGroup: input },
+      deduplication_key: [],
+      tags: [],
     });
 
     if ('Err' in result) {
@@ -283,9 +310,12 @@ export class StationService {
   async editUserGroup(input: EditUserGroupOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
       operation: { EditUserGroup: input },
+      deduplication_key: [],
+      tags: [],
     });
 
     if ('Err' in result) {
@@ -298,9 +328,12 @@ export class StationService {
   async addUser(input: AddUserOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
       operation: { AddUser: input },
+      deduplication_key: [],
+      tags: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -313,9 +346,12 @@ export class StationService {
   async editUser(input: EditUserOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
       operation: { EditUser: input },
+      deduplication_key: [],
+      tags: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -386,6 +422,33 @@ export class StationService {
     return result.Ok;
   }
 
+  async fetchUpgraderId(): Promise<Principal> {
+    let controllers = (await fetchCanisterControllers(this.agent, this.stationId)) ?? [];
+    controllers = controllers.filter(
+      (c: Principal) => c.toText() !== 'r7inp-6aaaa-aaaaa-aaabq-cai',
+    ); // filter out nns root
+    const maybe_upgrader_id = controllers.length > 0 ? controllers[0] : null;
+
+    try {
+      const { system } = await this.systemInfo();
+      return system.upgrader_id;
+    } catch (error) {
+      if (maybe_upgrader_id) {
+        logger.warn(
+          `Failed to fetch upgrader ID from system info, using first controller as upgrader ID. Reason: ${JSON.stringify(error)}`,
+        );
+
+        return maybe_upgrader_id;
+      }
+
+      logger.error(
+        `Failed to fetch upgrader ID from system info and no controllers found. Reason: ${JSON.stringify(error)}`,
+      );
+
+      throw new Error('No upgrader ID found');
+    }
+  }
+
   async listNotifications(
     input: ListNotificationsInput,
     verifiedCall = false,
@@ -449,6 +512,8 @@ export class StationService {
       sort_by: sortingCriteria,
       only_approvable: !!onlyApprovable,
       with_evaluation_results: false,
+      deduplication_keys: [],
+      tags: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -466,6 +531,7 @@ export class StationService {
     const result = await actor.get_next_approvable_request({
       operation_types: types ? [types] : [],
       excluded_request_ids: excludedRequestIds ?? [],
+      sort_by: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -499,6 +565,16 @@ export class StationService {
 
   async submitRequestApproval(input: SubmitRequestApprovalInput): Promise<Request> {
     const result = await this.actor.submit_request_approval(input);
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async cancelRequest(input: CancelRequestInput): Promise<Request> {
+    const result = await this.actor.cancel_request(input);
 
     if (variantIs(result, 'Err')) {
       throw result.Err;
@@ -543,8 +619,51 @@ export class StationService {
     return result.Ok;
   }
 
+  async listAllAccounts(verifiedCall = false): Promise<{
+    accounts: Account[];
+    privileges: AccountCallerPrivileges[];
+  }> {
+    const actor = verifiedCall ? this.verified_actor : this.actor;
+
+    const accounts: Account[] = [];
+    const privileges: AccountCallerPrivileges[] = [];
+    let nextOffset: [bigint] | [] = [];
+
+    do {
+      const result = await actor.list_accounts({
+        paginate: [
+          {
+            limit: [100],
+            offset: nextOffset,
+          },
+        ],
+        search_term: [],
+      });
+
+      if (variantIs(result, 'Err')) {
+        throw result.Err;
+      }
+
+      accounts.push(...result.Ok.accounts);
+      privileges.push(...result.Ok.privileges);
+
+      nextOffset = result.Ok.next_offset as [bigint] | []; // have to force cast here because of typescript inference
+    } while (nextOffset.length > 0);
+
+    return { accounts, privileges };
+  }
+
   async listAddressBook(
-    { limit, offset, blockchain, labels, ids, addresses }: ListAddressBookEntriesArgs = {},
+    {
+      limit,
+      offset,
+      blockchain,
+      labels,
+      ids,
+      addresses,
+      address_formats,
+      search_term,
+    }: ListAddressBookEntriesArgs = {},
     verifiedCall = false,
   ): Promise<ExtractOk<ListAddressBookEntriesResult>> {
     const actor = verifiedCall ? this.verified_actor : this.actor;
@@ -559,7 +678,20 @@ export class StationService {
       labels: labels ? [labels] : [],
       addresses: addresses ? [addresses] : [],
       ids: ids ? [ids] : [],
+      address_formats: address_formats ? [address_formats] : [],
+      search_term: search_term ? [search_term] : [],
     });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok;
+  }
+
+  async getAsset(input: GetAssetInput, verifiedCall = false): Promise<ExtractOk<GetAssetResult>> {
+    const actor = verifiedCall ? this.verified_actor : this.actor;
+    const result = await actor.get_asset(input);
 
     if (variantIs(result, 'Err')) {
       throw result.Err;
@@ -571,11 +703,34 @@ export class StationService {
   async fundExternalCanister(input: FundExternalCanisterOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: {
         FundExternalCanister: input,
       },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async monitorExternalCanister(input: MonitorExternalCanisterOperationInput): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
+      title: [],
+      summary: [],
+      tags: [],
+      operation: {
+        MonitorExternalCanister: input,
+      },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -591,14 +746,17 @@ export class StationService {
   ): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: {
         ConfigureExternalCanister: {
           canister_id: canisterId,
           kind: { NativeSettings: input },
         },
       },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -614,11 +772,14 @@ export class StationService {
   ): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: opts.comment ? [opts.comment] : [],
+      tags: [],
       operation: {
         ChangeExternalCanister: input,
       },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -639,14 +800,17 @@ export class StationService {
 
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: {
         ConfigureExternalCanister: {
           canister_id: input.canisterId,
           kind: operationKind,
         },
       },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -656,9 +820,24 @@ export class StationService {
     return result.Ok.request;
   }
 
-  async getExternalCanisterStatus(canisterId: Principal): Promise<ExtractOk<CanisterStatusResult>> {
-    const result = await this.actor.canister_status({
+  async getExternalCanisterStatus(canisterId: Principal): Promise<CanisterStatusResponse> {
+    return await this.actor.canister_status({
       canister_id: canisterId,
+    });
+  }
+
+  async listAssets(
+    { limit, offset }: ListAssetsArgs = {},
+    verifiedCall = false,
+  ): Promise<ExtractOk<ListAssetsResult>> {
+    const actor = verifiedCall ? this.verified_actor : this.actor;
+    const result = await actor.list_assets({
+      paginate: [
+        {
+          limit: limit !== undefined ? [limit] : [],
+          offset: offset !== undefined ? [BigInt(offset)] : [],
+        },
+      ],
     });
 
     if (variantIs(result, 'Err')) {
@@ -709,6 +888,24 @@ export class StationService {
     return result.Ok;
   }
 
+  async addAsset(input: AddAssetOperationInput): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      title: [],
+      summary: [],
+      tags: [],
+      operation: { AddAsset: input },
+      expiration_dt: [],
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
   async fetchExternalCanisterFilters(
     args: {
       with_labels?: boolean;
@@ -735,9 +932,48 @@ export class StationService {
   async addCanister(input: CreateExternalCanisterOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { CreateExternalCanister: input },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async editAsset(input: EditAssetOperationInput): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      title: [],
+      summary: [],
+      tags: [],
+      operation: { EditAsset: input },
+      expiration_dt: [],
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async removeAsset(input: RemoveAssetOperationInput): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      title: [],
+      summary: [],
+      tags: [],
+      operation: { RemoveAsset: input },
+      expiration_dt: [],
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -778,9 +1014,12 @@ export class StationService {
   async addAddressBookEntry(input: AddAddressBookEntryOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { AddAddressBookEntry: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -793,9 +1032,12 @@ export class StationService {
   async editAddressBookEntry(input: EditAddressBookEntryOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { EditAddressBookEntry: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -812,7 +1054,9 @@ export class StationService {
     return variantIs(result, 'Healthy');
   }
 
-  async fetchAccountBalances(input: FetchAccountBalancesInput): Promise<AccountBalance[]> {
+  async fetchAccountBalances(
+    input: FetchAccountBalancesInput,
+  ): Promise<ExtractOk<FetchAccountBalancesResult>['balances']> {
     const result = await this.actor.fetch_account_balances(input);
 
     if (variantIs(result, 'Err')) {
@@ -875,9 +1119,12 @@ export class StationService {
   async addExternalCanister(input: CreateExternalCanisterOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { CreateExternalCanister: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -899,8 +1146,10 @@ export class StationService {
   ): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: opts.comment ? [opts.comment] : [],
+      tags: [],
       operation: {
         CallExternalCanister: {
           execution_method: {
@@ -912,6 +1161,7 @@ export class StationService {
           validation_method: call.validationMethod !== undefined ? [call.validationMethod] : [],
         },
       },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -927,8 +1177,10 @@ export class StationService {
   ): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: {
         ConfigureExternalCanister: {
           canister_id: canisterId,
@@ -937,6 +1189,104 @@ export class StationService {
           },
         },
       },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async getExternalCanisterSnapshots(
+    canisterId: Principal,
+  ): Promise<ExtractOk<CanisterSnapshotsResult>> {
+    const result = await this.actor.canister_snapshots({
+      canister_id: canisterId,
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok;
+  }
+
+  async createExternalCanisterSnapshot(
+    canisterId: Principal,
+    opts: { comment?: string; force?: boolean; replaceSnapshot?: string } = {},
+  ): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
+      title: [],
+      summary: opts.comment ? [opts.comment] : [],
+      tags: [],
+      operation: {
+        SnapshotExternalCanister: {
+          canister_id: canisterId,
+          replace_snapshot: opts.replaceSnapshot ? [opts.replaceSnapshot] : [],
+          force: opts.force ?? false,
+        },
+      },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async restoreExternalCanisterSnapshot(
+    canisterId: Principal,
+    snapshotId: string,
+    opts: { comment?: string } = {},
+  ): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
+      title: [],
+      summary: opts.comment ? [opts.comment] : [],
+      tags: [],
+      operation: {
+        RestoreExternalCanister: {
+          canister_id: canisterId,
+          snapshot_id: snapshotId,
+        },
+      },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async removeExternalCanisterSnapshot(
+    canisterId: Principal,
+    snapshotId: string,
+    opts: { comment?: string } = {},
+  ): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
+      title: [],
+      summary: opts.comment ? [opts.comment] : [],
+      tags: [],
+      operation: {
+        PruneExternalCanister: {
+          canister_id: canisterId,
+          prune: {
+            snapshot: snapshotId,
+          },
+        },
+      },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -963,9 +1313,12 @@ export class StationService {
   async editPermission(input: EditPermissionOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { EditPermission: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -978,9 +1331,12 @@ export class StationService {
   async editRequestPolicy(input: EditRequestPolicyOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { EditRequestPolicy: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -993,9 +1349,12 @@ export class StationService {
   async addRequestPolicy(input: AddRequestPolicyOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { AddRequestPolicy: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1008,9 +1367,12 @@ export class StationService {
   async createManageSystemInfoRequest(input: ManageSystemInfoOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { ManageSystemInfo: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1025,13 +1387,16 @@ export class StationService {
   ): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: {
         SetDisasterRecovery: {
           committee: [input],
         },
       },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1044,9 +1409,12 @@ export class StationService {
   async editAccount(input: EditAccountOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { EditAccount: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1059,9 +1427,12 @@ export class StationService {
   async addAccount(input: AddAccountOperationInput): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { AddAccount: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1074,9 +1445,12 @@ export class StationService {
   async transfer(input: TransferOperationInput, summary?: string): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: summary ? [summary] : [],
+      tags: [],
       operation: { Transfer: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1092,9 +1466,12 @@ export class StationService {
   ): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: opts.comment ? [opts.comment] : [],
+      tags: [],
       operation: { SystemUpgrade: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1138,9 +1515,12 @@ export class StationService {
   async removeRequestPolicy(id: UUID): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { RemoveRequestPolicy: { policy_id: id } },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {
@@ -1153,9 +1533,97 @@ export class StationService {
   async removeAddressBookEntry(id: UUID): Promise<Request> {
     const result = await this.actor.create_request({
       execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
       title: [],
       summary: [],
+      tags: [],
       operation: { RemoveAddressBookEntry: { address_book_entry_id: id } },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async listNamedRules(
+    { limit, offset }: { limit?: number; offset?: number } = {},
+    verifiedCall = false,
+  ): Promise<ExtractOk<ListNamedRulesResult>> {
+    const actor = verifiedCall ? this.verified_actor : this.actor;
+    const result = await actor.list_named_rules({
+      paginate: [
+        {
+          limit: limit ? [limit] : [],
+          offset: offset ? [BigInt(offset)] : [],
+        },
+      ],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok;
+  }
+
+  async removeNamedRule(id: UUID): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
+      title: [],
+      summary: [],
+      tags: [],
+      operation: { RemoveNamedRule: { named_rule_id: id } },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async getNamedRule(id: UUID): Promise<ExtractOk<GetNamedRuleResult>> {
+    const result = await this.actor.get_named_rule({ named_rule_id: id });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok;
+  }
+
+  async editNamedRule(input: EditNamedRuleOperationInput): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
+      title: [],
+      summary: [],
+      tags: [],
+      operation: { EditNamedRule: input },
+      deduplication_key: [],
+    });
+
+    if (variantIs(result, 'Err')) {
+      throw result.Err;
+    }
+
+    return result.Ok.request;
+  }
+
+  async addNamedRule(input: AddNamedRuleOperationInput): Promise<Request> {
+    const result = await this.actor.create_request({
+      execution_plan: [{ Immediate: null }],
+      expiration_dt: [],
+      title: [],
+      summary: [],
+      tags: [],
+      operation: { AddNamedRule: input },
+      deduplication_key: [],
     });
 
     if (variantIs(result, 'Err')) {

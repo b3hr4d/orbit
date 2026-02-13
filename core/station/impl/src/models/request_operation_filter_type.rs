@@ -14,6 +14,7 @@ pub enum RequestOperationFilterType {
     EditUserGroup,
     RemoveUserGroup,
     SystemUpgrade,
+    SystemRestore,
     SetDisasterRecovery,
     ChangeExternalCanister(Principal),
     CreateExternalCanister,
@@ -28,6 +29,16 @@ pub enum RequestOperationFilterType {
     ManageSystemInfo,
     ConfigureExternalCanister(Principal),
     FundExternalCanister(Principal),
+    MonitorExternalCanister(Principal),
+    SnapshotExternalCanister(Principal),
+    RestoreExternalCanister(Principal),
+    PruneExternalCanister(Principal),
+    AddAsset,
+    EditAsset,
+    RemoveAsset,
+    AddNamedRule,
+    EditNamedRule,
+    RemoveNamedRule,
 }
 
 impl From<RequestOperation> for RequestOperationFilterType {
@@ -44,6 +55,7 @@ impl From<RequestOperation> for RequestOperationFilterType {
             RequestOperation::EditUserGroup(_) => RequestOperationFilterType::EditUserGroup,
             RequestOperation::RemoveUserGroup(_) => RequestOperationFilterType::RemoveUserGroup,
             RequestOperation::SystemUpgrade(_) => RequestOperationFilterType::SystemUpgrade,
+            RequestOperation::SystemRestore(_) => RequestOperationFilterType::SystemRestore,
             RequestOperation::SetDisasterRecovery(_) => {
                 RequestOperationFilterType::SetDisasterRecovery
             }
@@ -80,6 +92,24 @@ impl From<RequestOperation> for RequestOperationFilterType {
             RequestOperation::FundExternalCanister(operation) => {
                 RequestOperationFilterType::FundExternalCanister(operation.canister_id)
             }
+            RequestOperation::MonitorExternalCanister(operation) => {
+                RequestOperationFilterType::MonitorExternalCanister(operation.canister_id)
+            }
+            RequestOperation::SnapshotExternalCanister(operation) => {
+                RequestOperationFilterType::SnapshotExternalCanister(operation.input.canister_id)
+            }
+            RequestOperation::RestoreExternalCanister(operation) => {
+                RequestOperationFilterType::RestoreExternalCanister(operation.input.canister_id)
+            }
+            RequestOperation::PruneExternalCanister(operation) => {
+                RequestOperationFilterType::PruneExternalCanister(operation.input.canister_id)
+            }
+            RequestOperation::AddAsset(_) => RequestOperationFilterType::AddAsset,
+            RequestOperation::EditAsset(_) => RequestOperationFilterType::EditAsset,
+            RequestOperation::RemoveAsset(_) => RequestOperationFilterType::RemoveAsset,
+            RequestOperation::AddNamedRule(_) => RequestOperationFilterType::AddNamedRule,
+            RequestOperation::EditNamedRule(_) => RequestOperationFilterType::EditNamedRule,
+            RequestOperation::RemoveNamedRule(_) => RequestOperationFilterType::RemoveNamedRule,
         }
     }
 }

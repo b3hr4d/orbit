@@ -1,3 +1,6 @@
+// The timestamp type used in the canister.
+type TimestampRFC3339 = text;
+
 // Generic error type added to responses that can fail.
 type Error = record {
   // Error code, added as a string to allow for custom error codes.
@@ -28,6 +31,10 @@ type UpgradeParams = record {
   module_extra_chunks : opt WasmModuleExtraChunks;
   // The argument to be passed to upgrade.
   arg : blob;
+  // Determines whether a backup snapshot should be taken (before the upgrade).
+  // If so, the last backup snapshot (if one exists) is atomically replaced
+  // by the new backup snapshot.
+  take_backup_snapshot : opt bool;
 };
 
 type TriggerUpgradeError = variant {
@@ -36,10 +43,42 @@ type TriggerUpgradeError = variant {
   UnexpectedError : text;
 };
 
+type TriggerUpgradeResponse = variant {
+  Ok;
+  Err : TriggerUpgradeError;
+};
+
+type RestoreParams = record {
+  // The snapshot to restore.
+  snapshot_id : blob;
+};
+
+type TriggerRestoreError = variant {
+  NotController;
+  Unauthorized;
+  UnexpectedError : text;
+};
+
+type TriggerRestoreResponse = variant {
+  Ok;
+  Err : TriggerRestoreError;
+};
+
 // Metadata for an account in the station canister.
 type Metadata = record { key : text; value : text };
 
-// Backup of Account in the station canister.
+// Backup of Asset in the station canister.
+type Asset = record {
+  id : text;
+  name : text;
+  symbol : text;
+  decimals : nat32;
+  blockchain : text;
+  standards : vec text;
+  metadata : vec Metadata;
+};
+
+// Backup of a legacy Account in the station canister.
 type Account = record {
   id : text;
   decimals : nat32;
@@ -49,6 +88,15 @@ type Account = record {
   address : text;
   standard : text;
   symbol : text;
+};
+
+// Backup of a multi asset Account in the station canister.
+type MultiAssetAccount = record {
+  id : text;
+  name : text;
+  seed : blob;
+  assets : vec text;
+  metadata : vec Metadata;
 };
 
 // Backup of admin user in the station canister.
@@ -62,12 +110,6 @@ type DisasterRecoveryCommittee = record {
   users : vec AdminUser;
   // The percentage of users that need to agree to perform an upgrade.
   quorum : nat16;
-};
-
-// Response to a successful trigger_upgrade query.
-type TriggerUpgradeResponse = variant {
-  Ok;
-  Err : TriggerUpgradeError;
 };
 
 // Set disaster recovery committee result.
@@ -92,9 +134,21 @@ type GetDisasterRecoveryAccountsResponse = record {
   accounts : vec Account;
 };
 
+// Response to a successful get_disaster_recovery_accounts_and_assets query.
+type GetDisasterRecoveryAccountsAndAssetsResponse = record {
+  accounts : vec MultiAssetAccount;
+  assets : vec Asset;
+};
+
 // Result of the get_disaster_recovery_accounts query.
 type GetDisasterRecoveryAccountsResult = variant {
   Ok : GetDisasterRecoveryAccountsResponse;
+  Err : Error;
+};
+
+// Result of the get_disaster_recovery_accounts_and_assets query.
+type GetDisasterRecoveryAccountsAndAssetsResult = variant {
+  Ok : GetDisasterRecoveryAccountsAndAssetsResponse;
   Err : Error;
 };
 
@@ -121,11 +175,18 @@ type SetDisasterRecoveryAccountsInput = record {
   accounts : vec Account;
 };
 
+// Set the disaster recovery accounts and assets. Called by the station canister
+// when accounts are added.
+type SetDisasterRecoveryAccountsAndAssetsInput = record {
+  accounts : vec MultiAssetAccount;
+  assets : vec Asset;
+};
+
 // Request to trigger disaster recovery. Requests are stored in the Upgrader
 // canister, and when at least `quorum` of the committee members
-// agree on the exact module, args, and install mode, the request is processed.
+// agree on the exact disaster recovery input, the request is processed.
 // Requests older than 1 week will be discarded.
-type RequestDisasterRecoveryInput = record {
+type RequestDisasterRecoveryInstallCodeInput = record {
   // The wasm module to be installed.
   module : blob;
   // Additional wasm module chunks to append to the wasm module.
@@ -134,6 +195,29 @@ type RequestDisasterRecoveryInput = record {
   arg : blob;
   // The install mode: Install, Upgrade, or Reinstall.
   install_mode : InstallMode;
+};
+type RequestDisasterRecoverySnapshotInput = record {
+  // A snapshot to be replaced.
+  replace_snapshot : opt text;
+  // Should a snapshot be taken if the station fails to stop.
+  force : bool;
+};
+type RequestDisasterRecoveryRestoreInput = record {
+  // A snapshot to be restored.
+  snapshot_id : text;
+};
+// The resource to prune.
+type RequestDisasterRecoveryPruneInput = variant {
+  chunk_store;
+  snapshot : text;
+  state;
+};
+type RequestDisasterRecoveryInput = variant {
+  InstallCode : RequestDisasterRecoveryInstallCodeInput;
+  Snapshot : RequestDisasterRecoverySnapshotInput;
+  Restore : RequestDisasterRecoveryRestoreInput;
+  Prune : RequestDisasterRecoveryPruneInput;
+  Start;
 };
 
 type InstallMode = variant {
@@ -187,16 +271,48 @@ type GetLogsResult = variant {
   Err : Error;
 };
 
+type StationRecoveryRequestInstallCodeOperation = record {
+  // The install mode: Install, Upgrade, or Reinstall.
+  install_mode : InstallMode;
+  // The sha of the wasm module to be installed.
+  wasm_sha256 : blob;
+  // The argument to be passed to the install function.
+  arg : blob;
+};
+
+type StationRecoveryRequestSnapshotOperation = record {
+  // A snapshot to be replaced.
+  replace_snapshot : opt text;
+  // Should a snapshot be taken if the station fails to stop.
+  force : bool;
+};
+
+type StationRecoveryRequestRestoreOperation = record {
+  // A snapshot to be restored.
+  snapshot_id : text;
+};
+
+// The resource to prune.
+type StationRecoveryRequestPruneOperation = variant {
+  chunk_store;
+  snapshot : text;
+  state;
+};
+
+type StationRecoveryRequestOperation = variant {
+  InstallCode : StationRecoveryRequestInstallCodeOperation;
+  Snapshot : StationRecoveryRequestSnapshotOperation;
+  Restore : StationRecoveryRequestRestoreOperation;
+  Prune : StationRecoveryRequestPruneOperation;
+  Start;
+};
+
 // Request to recover the station.
 type StationRecoveryRequest = record {
   // The requester user id.
   user_id : text;
-  // The sha of the wasm module to be installed.
-  wasm_sha256 : blob;
-  // The install mode: Install, Upgrade, or Reinstall.
-  install_mode : InstallMode;
-  // The argument to be passed to the install function.
-  arg : blob;
+  // The disaster recovery operation.
+  operation : StationRecoveryRequestOperation;
   // The request submission timestamp.
   submitted_at : text;
 };
@@ -224,8 +340,12 @@ type RecoveryResult = variant {
 type GetDisasterRecoveryStateResponse = record {
   // The disaster recovery committee.
   committee : opt DisasterRecoveryCommittee;
-  // The backup of the station accounts.
+  // The backup of the legacy station accounts.
   accounts : vec Account;
+  // The backup of the station multi asset accounts.
+  multi_asset_accounts : vec MultiAssetAccount;
+  // The backup of the station assets.
+  assets : vec Asset;
   // The current list of recovery requests.
   recovery_requests : vec StationRecoveryRequest;
   // The current recovery status.
@@ -241,14 +361,37 @@ type GetDisasterRecoveryStateResult = variant {
   Err : Error;
 };
 
+type CanisterSnapshotsResponse = vec record {
+  snapshot_id : text;
+  taken_at_timestamp : TimestampRFC3339;
+  total_size : nat64;
+};
+
+type CanisterSnapshotsResult = variant {
+  Ok : CanisterSnapshotsResponse;
+  Err : Error;
+};
+
+type SetMaxBackupSnapshotsResult = variant {
+  Ok;
+  Err : text;
+};
+
 service : (InitArg) -> {
   "trigger_upgrade" : (UpgradeParams) -> (TriggerUpgradeResponse);
+  "trigger_restore" : (RestoreParams) -> (TriggerRestoreResponse);
+  "set_max_backup_snapshots" : (nat64) -> (SetMaxBackupSnapshotsResult);
   "set_disaster_recovery_committee" : (SetDisasterRecoveryCommitteeInput) -> (SetDisasterRecoveryResult);
   "set_disaster_recovery_accounts" : (SetDisasterRecoveryAccountsInput) -> (SetDisasterRecoveryResult);
+  "set_disaster_recovery_accounts_and_assets" : (SetDisasterRecoveryAccountsAndAssetsInput) -> (SetDisasterRecoveryResult);
   "is_committee_member" : () -> (IsCommitteeMemberResult) query;
   "get_disaster_recovery_accounts" : () -> (GetDisasterRecoveryAccountsResult) query;
+  "get_disaster_recovery_accounts_and_assets" : () -> (GetDisasterRecoveryAccountsAndAssetsResult) query;
   "get_disaster_recovery_committee" : () -> (GetDisasterRecoveryCommitteeResult) query;
   "get_disaster_recovery_state" : () -> (GetDisasterRecoveryStateResult) query;
   "request_disaster_recovery" : (RequestDisasterRecoveryInput) -> (RequestDisasterRecoveryResult);
   "get_logs" : (GetLogsInput) -> (GetLogsResult) query;
+  // Get snapshots of the station.
+  // This method can only be invoked by disaster recovery committee members.
+  "canister_snapshots" : () -> (CanisterSnapshotsResult);
 };

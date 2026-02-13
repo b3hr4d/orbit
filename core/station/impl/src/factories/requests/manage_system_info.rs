@@ -1,7 +1,7 @@
 use super::{Create, Execute, RequestExecuteStage};
 use crate::{
     errors::{RequestError, RequestExecuteError},
-    models::{ManageSystemInfoOperation, Request, RequestExecutionPlan, RequestOperation},
+    models::{ManageSystemInfoOperation, Request, RequestOperation},
     services::SYSTEM_SERVICE,
 };
 use async_trait::async_trait;
@@ -18,21 +18,14 @@ impl Create<station_api::ManageSystemInfoOperationInput> for ManageSystemInfoReq
         input: station_api::CreateRequestInput,
         operation_input: station_api::ManageSystemInfoOperationInput,
     ) -> Result<Request, RequestError> {
-        let request = Request::new(
+        let request = Request::from_request_creation_input(
             request_id,
             requested_by_user,
-            Request::default_expiration_dt_ns(),
+            input,
             RequestOperation::ManageSystemInfo(ManageSystemInfoOperation {
                 input: operation_input.into(),
             }),
-            input
-                .execution_plan
-                .map(Into::into)
-                .unwrap_or(RequestExecutionPlan::Immediate),
-            input
-                .title
-                .unwrap_or_else(|| "Manage System Info".to_string()),
-            input.summary,
+            "Manage System".to_string(),
         );
 
         Ok(request)
@@ -53,7 +46,10 @@ impl<'p, 'o> ManageSystemInfoRequestExecute<'p, 'o> {
 #[async_trait]
 impl Execute for ManageSystemInfoRequestExecute<'_, '_> {
     async fn execute(&self) -> Result<RequestExecuteStage, RequestExecuteError> {
-        SYSTEM_SERVICE.update_system_info(self.operation.input.clone());
+        SYSTEM_SERVICE
+            .update_system_info(self.operation.input.clone())
+            .await
+            .map_err(|err| RequestExecuteError::Failed { reason: err })?;
 
         Ok(RequestExecuteStage::Completed(
             self.request.operation.clone(),
@@ -66,7 +62,7 @@ mod tests {
     use super::*;
     use crate::{
         core::{read_system_info, test_utils},
-        models::ManageSystemInfoOperationInput,
+        models::{ManageSystemInfoOperationInput, RequestExecutionPlan},
     };
     use tests::mnanage_system_info_test_utils::{
         mock_manage_system_info_api_input, mock_request_api_operation,
@@ -96,6 +92,8 @@ mod tests {
                 input: ManageSystemInfoOperationInput {
                     name: Some("name".to_string()),
                     cycle_obtain_strategy: None,
+                    max_station_backup_snapshots: None,
+                    max_upgrader_backup_snapshots: None,
                 },
             })
         );
@@ -147,6 +145,8 @@ mod mnanage_system_info_test_utils {
         station_api::ManageSystemInfoOperationInput {
             name: Some("name".to_string()),
             cycle_obtain_strategy: None,
+            max_station_backup_snapshots: None,
+            max_upgrader_backup_snapshots: None,
         }
     }
 
@@ -155,9 +155,12 @@ mod mnanage_system_info_test_utils {
             title: Some("title".to_string()),
             summary: Some("summary".to_string()),
             execution_plan: Some(station_api::RequestExecutionScheduleDTO::Immediate),
+            expiration_dt: None,
             operation: station_api::RequestOperationInput::ManageSystemInfo(
                 mock_manage_system_info_api_input(),
             ),
+            deduplication_key: None,
+            tags: None,
         }
     }
 }

@@ -21,7 +21,7 @@ import { services } from '~/plugins/services.plugin';
 import { StationService } from '~/services/station.service';
 import { useAppStore } from '~/stores/app.store';
 import { Privilege } from '~/types/auth.types';
-import { BlockchainStandard, BlockchainType } from '~/types/chain.types';
+import { BlockchainType } from '~/types/chain.types';
 import { LoadableItem } from '~/types/helper.types';
 import { computedStationName, isApiError, popRedirectToLocation } from '~/utils/app.utils';
 import { hasRequiredPrivilege } from '~/utils/auth.utils';
@@ -73,15 +73,20 @@ export const createUserInitialAccount = async (
   userId: UUID,
   station = useStationStore(),
 ): Promise<void> => {
+  const maybeIcpId = station.configuration.details.supported_assets.find(
+    asset => asset.blockchain == BlockchainType.InternetComputer && asset.symbol == 'ICP',
+  )?.id;
+
   await station.service.createRequest({
     title: [],
     summary: [],
     execution_plan: [{ Immediate: null }],
+    expiration_dt: [],
+    tags: [],
     operation: {
       AddAccount: {
         name: i18n.global.t('app.initial_account_name'),
-        blockchain: BlockchainType.InternetComputer,
-        standard: BlockchainStandard.Native,
+        assets: maybeIcpId ? [maybeIcpId] : [],
         metadata: [],
         read_permission: { auth_scope: { Restricted: null }, user_groups: [], users: [userId] },
         transfer_permission: {
@@ -98,6 +103,7 @@ export const createUserInitialAccount = async (
         transfer_request_policy: [{ Quorum: { min_approved: 1, approvers: { Id: [userId] } } }],
       },
     },
+    deduplication_key: [],
   });
 };
 
@@ -123,6 +129,7 @@ const initialStoreState = (): StationStoreState => {
         name: '',
         version: '',
         supported_assets: [],
+        supported_blockchains: [],
       },
       cycleObtainStrategy: { Disabled: null },
     },
@@ -234,8 +241,16 @@ export const useStationStore = defineStore('station', {
         this.privileges = myUser.privileges;
 
         if (hasRequiredPrivilege({ anyOf: [Privilege.SystemInfo] })) {
-          const systemInfo = await stationService.systemInfo();
-          this.configuration.cycleObtainStrategy = systemInfo.system.cycle_obtain_strategy;
+          await stationService
+            .systemInfo()
+            .then(info => {
+              this.configuration.cycleObtainStrategy = info.system.cycle_obtain_strategy;
+            })
+            .catch(err => {
+              logger.error(`Failed to load system info`, { err });
+
+              this.configuration.cycleObtainStrategy = { Disabled: null };
+            });
         }
 
         // loads the capabilities of the station
@@ -395,8 +410,8 @@ export const useStationStore = defineStore('station', {
       return stationVersion;
     },
     async loadUpgraderVersion(): Promise<string> {
-      const { system } = await this.service.systemInfo();
-      const upgraderVersion = await fetchCanisterVersion(icAgent.get(), system.upgrader_id);
+      const upgraderId = await this.service.fetchUpgraderId();
+      const upgraderVersion = await fetchCanisterVersion(icAgent.get(), upgraderId);
 
       this.versionManagement.upgraderVersion = upgraderVersion;
 

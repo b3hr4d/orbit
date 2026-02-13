@@ -1,6 +1,6 @@
 use super::HelperMapper;
 use crate::{
-    core::{ic_cdk::api::trap, CallContext},
+    core::{ic_cdk::api::trap, validation::EnsureExternalCanister, CallContext},
     models::{
         resource::{
             AccountResourceAction, CallExternalCanisterResourceTarget,
@@ -15,9 +15,11 @@ use crate::{
 };
 use orbit_essentials::repository::Repository;
 use orbit_essentials::types::UUID;
-use station_api::{RequestOperationInput, UserPrivilege};
+use station_api::{
+    CanisterSnapshotsInput, CanisterStatusInput, RequestOperationInput, UserPrivilege,
+};
 
-pub const USER_PRIVILEGES: [UserPrivilege; 19] = [
+pub const USER_PRIVILEGES: [UserPrivilege; 23] = [
     UserPrivilege::Capabilities,
     UserPrivilege::SystemInfo,
     UserPrivilege::ManageSystemInfo,
@@ -37,6 +39,10 @@ pub const USER_PRIVILEGES: [UserPrivilege; 19] = [
     UserPrivilege::CreateExternalCanister,
     UserPrivilege::ListExternalCanisters,
     UserPrivilege::CallAnyExternalCanister,
+    UserPrivilege::AddAsset,
+    UserPrivilege::ListAssets,
+    UserPrivilege::ListNamedRules,
+    UserPrivilege::AddNamedRule,
 ];
 
 impl From<UserPrivilege> for Resource {
@@ -72,6 +78,10 @@ impl From<UserPrivilege> for Resource {
                     validation_method: ValidationMethodResourceTarget::No,
                 }),
             ),
+            UserPrivilege::AddAsset => Resource::Asset(ResourceAction::Create),
+            UserPrivilege::ListAssets => Resource::Asset(ResourceAction::List),
+            UserPrivilege::ListNamedRules => Resource::NamedRule(ResourceAction::List),
+            UserPrivilege::AddNamedRule => Resource::NamedRule(ResourceAction::Create),
         }
     }
 }
@@ -144,6 +154,26 @@ impl From<&station_api::GetUserGroupInput> for Resource {
     }
 }
 
+impl From<&station_api::GetAssetInput> for Resource {
+    fn from(input: &station_api::GetAssetInput) -> Self {
+        Resource::Asset(ResourceAction::Read(ResourceId::Id(
+            *HelperMapper::to_uuid(input.asset_id.to_owned())
+                .expect("Invalid asset id")
+                .as_bytes(),
+        )))
+    }
+}
+
+impl From<&station_api::GetNamedRuleInput> for Resource {
+    fn from(input: &station_api::GetNamedRuleInput) -> Self {
+        Resource::NamedRule(ResourceAction::Read(ResourceId::Id(
+            *HelperMapper::to_uuid(input.named_rule_id.to_owned())
+                .expect("Invalid named rule id")
+                .as_bytes(),
+        )))
+    }
+}
+
 impl From<&station_api::SubmitRequestApprovalInput> for Resource {
     fn from(input: &station_api::SubmitRequestApprovalInput) -> Self {
         Resource::Request(RequestResourceAction::Read(ResourceId::Id(
@@ -167,6 +197,16 @@ impl From<&station_api::GetAddressBookEntryInputDTO> for Resource {
 impl From<&station_api::ListNotificationsInput> for Resource {
     fn from(_input: &station_api::ListNotificationsInput) -> Self {
         Resource::Notification(NotificationResourceAction::List)
+    }
+}
+
+impl From<&station_api::CancelRequestInput> for Resource {
+    fn from(input: &station_api::CancelRequestInput) -> Self {
+        Resource::Request(RequestResourceAction::Read(ResourceId::Id(
+            *HelperMapper::to_uuid(input.request_id.to_owned())
+                .expect("Invalid request id")
+                .as_bytes(),
+        )))
     }
 }
 
@@ -231,7 +271,8 @@ impl From<&station_api::CreateRequestInput> for Resource {
                 )))
             }
             RequestOperationInput::SetDisasterRecovery(_)
-            | RequestOperationInput::SystemUpgrade(_) => {
+            | RequestOperationInput::SystemUpgrade(_)
+            | RequestOperationInput::SystemRestore(_) => {
                 Resource::System(SystemResourceAction::Upgrade)
             }
             RequestOperationInput::ChangeExternalCanister(input) => {
@@ -250,6 +291,12 @@ impl From<&station_api::CreateRequestInput> for Resource {
                     ExternalCanisterId::Canister(input.canister_id),
                 ))
             }
+            // Monitoring of external canisters share the same `Fund` action privilege
+            RequestOperationInput::MonitorExternalCanister(input) => {
+                Resource::ExternalCanister(ExternalCanisterResourceAction::Fund(
+                    ExternalCanisterId::Canister(input.canister_id),
+                ))
+            }
             RequestOperationInput::CreateExternalCanister(_) => {
                 Resource::ExternalCanister(ExternalCanisterResourceAction::Create)
             }
@@ -262,6 +309,21 @@ impl From<&station_api::CreateRequestInput> for Resource {
                         validation_method: validation_method.into(),
                         execution_method: execution_method.into(),
                     },
+                ))
+            }
+            RequestOperationInput::SnapshotExternalCanister(input) => {
+                Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                    ExternalCanisterId::Canister(input.canister_id),
+                ))
+            }
+            RequestOperationInput::RestoreExternalCanister(input) => {
+                Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                    ExternalCanisterId::Canister(input.canister_id),
+                ))
+            }
+            RequestOperationInput::PruneExternalCanister(input) => {
+                Resource::ExternalCanister(ExternalCanisterResourceAction::Change(
+                    ExternalCanisterId::Canister(input.canister_id),
                 ))
             }
             RequestOperationInput::EditPermission(_) => {
@@ -287,6 +349,62 @@ impl From<&station_api::CreateRequestInput> for Resource {
             RequestOperationInput::ManageSystemInfo(_) => {
                 Resource::System(SystemResourceAction::ManageSystemInfo)
             }
+            RequestOperationInput::AddAsset(_) => Resource::Asset(ResourceAction::Create),
+            RequestOperationInput::EditAsset(input) => {
+                Resource::Asset(ResourceAction::Update(ResourceId::Id(
+                    *HelperMapper::to_uuid(input.asset_id.to_owned())
+                        .expect("Invalid asset id")
+                        .as_bytes(),
+                )))
+            }
+            RequestOperationInput::RemoveAsset(input) => {
+                Resource::Asset(ResourceAction::Delete(ResourceId::Id(
+                    *HelperMapper::to_uuid(input.asset_id.to_owned())
+                        .expect("Invalid asset id")
+                        .as_bytes(),
+                )))
+            }
+            RequestOperationInput::AddNamedRule(_) => Resource::NamedRule(ResourceAction::Create),
+            RequestOperationInput::EditNamedRule(input) => {
+                Resource::NamedRule(ResourceAction::Update(ResourceId::Id(
+                    *HelperMapper::to_uuid(input.named_rule_id.to_owned())
+                        .expect("Invalid named rule id")
+                        .as_bytes(),
+                )))
+            }
+            RequestOperationInput::RemoveNamedRule(input) => {
+                Resource::NamedRule(ResourceAction::Delete(ResourceId::Id(
+                    *HelperMapper::to_uuid(input.named_rule_id.to_owned())
+                        .expect("Invalid named rule id")
+                        .as_bytes(),
+                )))
+            }
+        }
+    }
+}
+
+impl From<&CanisterSnapshotsInput> for Resource {
+    fn from(input: &CanisterSnapshotsInput) -> Self {
+        let canister_id = input.canister_id;
+        if EnsureExternalCanister::is_external_canister(canister_id) {
+            Resource::ExternalCanister(ExternalCanisterResourceAction::Read(
+                ExternalCanisterId::Canister(canister_id),
+            ))
+        } else {
+            Resource::System(SystemResourceAction::SystemInfo)
+        }
+    }
+}
+
+impl From<&CanisterStatusInput> for Resource {
+    fn from(input: &CanisterStatusInput) -> Self {
+        let canister_id = input.canister_id;
+        if EnsureExternalCanister::is_external_canister(canister_id) {
+            Resource::ExternalCanister(ExternalCanisterResourceAction::Read(
+                ExternalCanisterId::Canister(canister_id),
+            ))
+        } else {
+            Resource::System(SystemResourceAction::SystemInfo)
         }
     }
 }

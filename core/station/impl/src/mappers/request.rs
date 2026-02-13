@@ -15,6 +15,7 @@ use station_api::{
 use uuid::Uuid;
 
 impl Request {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         request_id: UUID,
         requester: UserId,
@@ -23,6 +24,8 @@ impl Request {
         execution_plan: RequestExecutionPlan,
         title: String,
         summary: Option<String>,
+        deduplication_key: Option<String>,
+        tags: Vec<String>,
     ) -> Request {
         let now = next_time();
 
@@ -38,6 +41,8 @@ impl Request {
             approvals: vec![],
             created_timestamp: now,
             last_modification_timestamp: now,
+            deduplication_key,
+            tags,
         }
     }
 
@@ -71,6 +76,8 @@ impl Request {
                 .iter()
                 .map(|approval| approval.to_owned().into())
                 .collect(),
+            deduplication_key: self.deduplication_key,
+            tags: self.tags,
         }
     }
 
@@ -80,6 +87,41 @@ impl Request {
 
     pub fn to_dto(self) -> RequestDTO {
         self.inner_to_dto(false)
+    }
+
+    pub fn from_request_creation_input(
+        request_id: UUID,
+        requested_by_user: UserId,
+        request_config: station_api::CreateRequestInput,
+        request_operation: RequestOperation,
+        request_default_title: String,
+    ) -> Request {
+        let mut expiration_dt = request_config
+            .expiration_dt
+            .map(|dt| rfc3339_to_timestamp(&dt))
+            .unwrap_or(Request::default_expiration_dt_ns());
+
+        let execution_plan = request_config
+            .execution_plan
+            .map(Into::into)
+            .unwrap_or(RequestExecutionPlan::Immediate);
+
+        if let RequestExecutionPlan::Scheduled { execution_time } = execution_plan {
+            // Ensure that if the execution time is set, the expiration time is not later than the execution time.
+            expiration_dt = expiration_dt.min(execution_time);
+        }
+
+        Request::new(
+            request_id,
+            requested_by_user,
+            expiration_dt,
+            request_operation,
+            execution_plan,
+            request_config.title.unwrap_or(request_default_title),
+            request_config.summary,
+            request_config.deduplication_key,
+            request_config.tags.unwrap_or_default(),
+        )
     }
 }
 

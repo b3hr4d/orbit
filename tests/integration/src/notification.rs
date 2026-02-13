@@ -5,7 +5,7 @@ use crate::utils::{
 };
 use crate::TestEnv;
 use orbit_essentials::api::ApiResult;
-use pocket_ic::{update_candid_as, CallError};
+use pocket_ic::update_candid_as;
 use station_api::{
     AddUserOperationInput, EditPermissionOperationInput, ListNotificationsInput,
     ListNotificationsResponse, MarkNotificationsReadInput, MeResponse, RequestApprovalStatusDTO,
@@ -25,6 +25,7 @@ fn notification_authorization() {
         module: vec![],
         module_extra_chunks: None,
         arg: None,
+        take_backup_snapshot: None,
     };
     let request_status = execute_request_with_extra_ticks(
         &env,
@@ -82,12 +83,9 @@ fn notification_authorization() {
         (list_notifications_input.clone(),),
     )
     .unwrap_err();
-    match err {
-        CallError::UserError(err) => assert!(err
-            .description
-            .contains("Unauthorized access to resources: Notification(List)")),
-        CallError::Reject(msg) => panic!("Unexpected reject: {}", msg),
-    };
+    assert!(err
+        .reject_message
+        .contains("Unauthorized access to resources: Notification(List)"));
     // and cannot mark foreign notifications read
     let err = update_candid_as::<_, (ApiResult<()>,)>(
         &env,
@@ -97,13 +95,10 @@ fn notification_authorization() {
         (mark_notifications_read_input.clone(),),
     )
     .unwrap_err();
-    match err {
-        CallError::UserError(err) => assert!(err.description.contains(&format!(
-            "Unauthorized access to resources: Notification(Update(Id({})))",
-            admin_notification.id
-        ))),
-        CallError::Reject(msg) => panic!("Unexpected reject: {}", msg),
-    };
+    assert!(err.reject_message.contains(&format!(
+        "Unauthorized access to resources: Notification(Update(Id({})))",
+        admin_notification.id
+    )));
 
     // register new non-admin user
     let add_user = AddUserOperationInput {
@@ -158,7 +153,7 @@ fn notification_authorization() {
         change_canister_operation_request,
     );
     match rejected_request.status {
-        RequestStatusDTO::Rejected { .. } => (),
+        RequestStatusDTO::Rejected => (),
         _ => panic!("Request should have been rejected."),
     };
 
@@ -203,11 +198,8 @@ fn notification_authorization() {
         (mark_notifications_read_input.clone(),),
     )
     .unwrap_err();
-    match err {
-        CallError::UserError(err) => assert!(err.description.contains(&format!(
-            "Unauthorized access to resources: Notification(Update(Id({})))",
-            admin_notification.id
-        ))),
-        CallError::Reject(msg) => panic!("Unexpected reject: {}", msg),
-    };
+    assert!(err.reject_message.contains(&format!(
+        "Unauthorized access to resources: Notification(Update(Id({})))",
+        admin_notification.id
+    )));
 }

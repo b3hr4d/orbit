@@ -73,7 +73,7 @@
         hide-details
         rows="1"
         auto-grow
-        :readonly="props.loading || !props.details.can_approve"
+        :readonly="props.loading || (!props.details.can_approve && !canCancel)"
       />
     </VCardText>
 
@@ -173,6 +173,17 @@
         :class="{ 'mt-8': props.details.can_approve }"
       />
       <div class="d-flex flex-column flex-md-row ga-1 justify-end flex-grow-1 w-100 w-md-auto">
+        <VBtn
+          v-if="canCancel"
+          data-test-id="request-details-cancel"
+          variant="plain"
+          class="ma-0"
+          :disabled="props.loading"
+          @click="$emit('cancel', reasonOrUndefined)"
+        >
+          {{ $t('terms.cancel_request') }}
+        </VBtn>
+
         <template v-if="props.details.can_approve">
           <VBtn
             data-test-id="request-details-reject"
@@ -241,6 +252,7 @@ import RequestMetadata from './RequestMetadata.vue';
 import RequestStatusChip from './RequestStatusChip.vue';
 import AddAccountOperation from './operations/AddAccountOperation.vue';
 import AddAddressBookEntryOperation from './operations/AddAddressBookEntryOperation.vue';
+import AddAssetOperation from './operations/AddAssetOperation.vue';
 import AddRequestPolicyOperation from './operations/AddRequestPolicyOperation.vue';
 import AddUserGroupOperation from './operations/AddUserGroupOperation.vue';
 import AddUserOperation from './operations/AddUserOperation.vue';
@@ -258,8 +270,16 @@ import RemoveUserGroupOperation from './operations/RemoveUserGroupOperation.vue'
 import SystemUpgradeOperation from './operations/SystemUpgradeOperation.vue';
 import TransferOperation from './operations/TransferOperation.vue';
 import UnsupportedOperation from './operations/UnsupportedOperation.vue';
+import EditAssetOperation from './operations/EditAssetOperation.vue';
+import RemoveAssetOperation from './operations/RemoveAssetOperation.vue';
+import { useStationStore } from '~/stores/station.store';
+import AddNamedRuleOperation from './operations/AddNamedRuleOperation.vue';
+import EditNamedRuleOperation from './operations/EditNamedRuleOperation.vue';
+import RemoveNamedRuleOperation from './operations/RemoveNamedRuleOperation.vue';
+import SetDisasterRecoveryOperation from './operations/SetDisasterRecoveryOperation.vue';
 
 const i18n = useI18n();
+const store = useStationStore();
 
 const props = withDefaults(
   defineProps<{
@@ -294,17 +314,30 @@ const componentsMap: {
   SystemUpgrade: SystemUpgradeOperation,
   EditPermission: EditPermissionOperation,
   ManageSystemInfo: ManageSystemInfoOperation,
+  AddAsset: AddAssetOperation,
+  EditAsset: EditAssetOperation,
+  RemoveAsset: RemoveAssetOperation,
   CallExternalCanister: CallExternalCanisterOperation,
+  AddNamedRule: AddNamedRuleOperation,
+  EditNamedRule: EditNamedRuleOperation,
+  RemoveNamedRule: RemoveNamedRuleOperation,
+  SetDisasterRecovery: SetDisasterRecoveryOperation,
+
   ChangeExternalCanister: UnsupportedOperation,
   CreateExternalCanister: UnsupportedOperation,
   ConfigureExternalCanister: UnsupportedOperation,
-  SetDisasterRecovery: UnsupportedOperation,
   FundExternalCanister: UnsupportedOperation,
+  MonitorExternalCanister: UnsupportedOperation,
+  PruneExternalCanister: UnsupportedOperation,
+  RestoreExternalCanister: UnsupportedOperation,
+  SnapshotExternalCanister: UnsupportedOperation,
+  SystemRestore: UnsupportedOperation,
 };
 
 defineEmits<{
   (event: 'approve', reason?: string): void;
   (event: 'reject', reason?: string): void;
+  (event: 'cancel', reason?: string): void;
 }>();
 
 const detailView = computed<{
@@ -329,6 +362,10 @@ const detailView = computed<{
         operation: props.request.operation[unknownOperationType as keyof RequestOperation],
       }
     : null;
+});
+
+const canCancel = computed(() => {
+  return props.request.requested_by === store.user.id && variantIs(props.request.status, 'Created');
 });
 
 const requestType = computed(() => {

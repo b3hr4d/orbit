@@ -49,7 +49,7 @@ impl TryFrom<NotificationType> for NotificationTypeDTO {
                 let maybe_evaluation = REQUEST_EVALUATION_RESULT_REPOSITORY.get(&ctx.request_id);
 
                 match request.status {
-                    RequestStatus::Rejected { .. } => {
+                    RequestStatus::Rejected => {
                         NotificationTypeDTO::RequestRejected(RequestRejectedNotificationDTO {
                             request_id: Uuid::from_bytes(ctx.request_id).to_string(),
                             operation_type: RequestOperationType::from(request.operation).into(),
@@ -89,11 +89,22 @@ impl TryFrom<NotificationType> for NotificationTypeDTO {
                     | RequestOperation::ManageSystemInfo(_)
                     | RequestOperation::SetDisasterRecovery(_)
                     | RequestOperation::SystemUpgrade(_)
+                    | RequestOperation::SystemRestore(_)
                     | RequestOperation::ChangeExternalCanister(_)
                     | RequestOperation::ConfigureExternalCanister(_)
                     | RequestOperation::CreateExternalCanister(_)
                     | RequestOperation::FundExternalCanister(_)
-                    | RequestOperation::CallExternalCanister(_) => None,
+                    | RequestOperation::MonitorExternalCanister(_)
+                    | RequestOperation::CallExternalCanister(_)
+                    | RequestOperation::SnapshotExternalCanister(_)
+                    | RequestOperation::RestoreExternalCanister(_)
+                    | RequestOperation::PruneExternalCanister(_)
+                    | RequestOperation::AddAsset(_)
+                    | RequestOperation::EditAsset(_)
+                    | RequestOperation::RemoveAsset(_)
+                    | RequestOperation::AddNamedRule(_)
+                    | RequestOperation::EditNamedRule(_)
+                    | RequestOperation::RemoveNamedRule(_) => None,
                 };
 
                 let user_id: Option<[u8; 16]> = match &request.operation {
@@ -115,11 +126,22 @@ impl TryFrom<NotificationType> for NotificationTypeDTO {
                     | RequestOperation::ManageSystemInfo(_)
                     | RequestOperation::SetDisasterRecovery(_)
                     | RequestOperation::SystemUpgrade(_)
+                    | RequestOperation::SystemRestore(_)
                     | RequestOperation::ChangeExternalCanister(_)
                     | RequestOperation::ConfigureExternalCanister(_)
                     | RequestOperation::CreateExternalCanister(_)
                     | RequestOperation::FundExternalCanister(_)
-                    | RequestOperation::CallExternalCanister(_) => None,
+                    | RequestOperation::MonitorExternalCanister(_)
+                    | RequestOperation::CallExternalCanister(_)
+                    | RequestOperation::SnapshotExternalCanister(_)
+                    | RequestOperation::RestoreExternalCanister(_)
+                    | RequestOperation::PruneExternalCanister(_)
+                    | RequestOperation::AddAsset(_)
+                    | RequestOperation::EditAsset(_)
+                    | RequestOperation::RemoveAsset(_)
+                    | RequestOperation::AddNamedRule(_)
+                    | RequestOperation::EditNamedRule(_)
+                    | RequestOperation::RemoveNamedRule(_) => None,
                 };
 
                 NotificationTypeDTO::RequestCreated(RequestCreatedNotificationDTO {

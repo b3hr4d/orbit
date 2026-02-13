@@ -1,7 +1,7 @@
 use super::{Create, Execute, RequestExecuteStage};
 use crate::{
     errors::{RequestError, RequestExecuteError},
-    models::{ChangeExternalCanisterOperation, Request, RequestExecutionPlan, RequestOperation},
+    models::{ChangeExternalCanisterOperation, Request, RequestOperation},
     services::ChangeCanisterService,
 };
 use async_trait::async_trait;
@@ -21,10 +21,10 @@ impl Create<ChangeExternalCanisterOperationInput> for ChangeExternalCanisterRequ
         input: CreateRequestInput,
         operation_input: ChangeExternalCanisterOperationInput,
     ) -> Result<Request, RequestError> {
-        let request = Request::new(
+        let request = Request::from_request_creation_input(
             request_id,
             requested_by_user,
-            Request::default_expiration_dt_ns(),
+            input,
             RequestOperation::ChangeExternalCanister(ChangeExternalCanisterOperation {
                 arg_checksum: operation_input.arg.as_ref().map(|arg| {
                     let mut hasher = Sha256::new();
@@ -42,14 +42,7 @@ impl Create<ChangeExternalCanisterOperationInput> for ChangeExternalCanisterRequ
                 },
                 input: operation_input.into(),
             }),
-            input
-                .execution_plan
-                .map(Into::into)
-                .unwrap_or(RequestExecutionPlan::Immediate),
-            input
-                .title
-                .unwrap_or_else(|| "ChangeExternalCanister".to_string()),
-            input.summary,
+            "Change canister".to_string(),
         );
 
         Ok(request)
@@ -79,21 +72,25 @@ impl<'p, 'o> ChangeExternalCanisterRequestExecute<'p, 'o> {
 #[async_trait]
 impl Execute for ChangeExternalCanisterRequestExecute<'_, '_> {
     async fn execute(&self) -> Result<RequestExecuteStage, RequestExecuteError> {
-        self.change_canister_service
+        let (_backup_snapshot_id, result) = self
+            .change_canister_service
             .install_canister(
                 self.operation.input.canister_id,
                 self.operation.input.mode.clone(),
                 &self.operation.input.module,
                 &self.operation.input.module_extra_chunks,
                 self.operation.input.arg.clone(),
+                false,
+                None,
             )
-            .await
-            .map_err(|err| RequestExecuteError::Failed {
-                reason: format!(
-                    "failed to install external canister {}: {}",
-                    self.operation.input.canister_id, err
-                ),
-            })?;
+            .await;
+
+        result.map_err(|err| RequestExecuteError::Failed {
+            reason: format!(
+                "failed to install external canister {}: {}",
+                self.operation.input.canister_id, err
+            ),
+        })?;
 
         Ok(RequestExecuteStage::Completed(
             self.request.operation.clone(),

@@ -7,7 +7,8 @@
     item-value="value"
     item-title="text"
     density="comfortable"
-    :disabled="props.disabled.value"
+    :variant="props.disabled.value ? 'plain' : undefined"
+    :readonly="props.disabled.value"
   />
 
   <div v-else class="py-2">
@@ -37,6 +38,7 @@ import UserGroupSpecifier from './UserGroupSpecifier.vue';
 import UserSpecifier from './UserSpecifier.vue';
 import UnsupportedSpecifier from './UnsupportedSpecifier.vue';
 import { VAutocomplete } from 'vuetify/components';
+import AssetSpecifier from './AssetSpecifier.vue';
 
 const input = withDefaults(
   defineProps<{
@@ -70,6 +72,8 @@ const componentsMap: {
 } = {
   AddUser: null,
   AddUserGroup: null,
+  AddAsset: null,
+
   AddAccount: null,
   AddRequestPolicy: null,
   AddAddressBookEntry: null,
@@ -83,6 +87,9 @@ const componentsMap: {
   EditUser: UserSpecifier,
   EditAddressBookEntry: AddressBookEntrySpecifier,
   RemoveAddressBookEntry: AddressBookEntrySpecifier,
+  EditAsset: AssetSpecifier,
+  RemoveAsset: AssetSpecifier,
+
   // below variants are not supported yet
   EditPermission: UnsupportedSpecifier,
   EditRequestPolicy: UnsupportedSpecifier,
@@ -92,6 +99,10 @@ const componentsMap: {
   CallExternalCanister: UnsupportedSpecifier,
   SetDisasterRecovery: UnsupportedSpecifier,
   FundExternalCanister: UnsupportedSpecifier,
+
+  AddNamedRule: UnsupportedSpecifier,
+  EditNamedRule: UnsupportedSpecifier,
+  RemoveNamedRule: UnsupportedSpecifier,
 };
 
 function isKeyOfRequestSpecifier(key: string): key is keyof RequestSpecifier {
@@ -246,6 +257,25 @@ watch(
         break;
       case RequestSpecifierEnum.SetDisasterRecovery:
         model.value = { [specifier.value]: null };
+        break;
+      case RequestSpecifierEnum.AddAsset:
+        model.value = { [specifier.value]: null };
+        break;
+      case RequestSpecifierEnum.EditAsset:
+        model.value = { [specifier.value]: { Any: null } };
+        break;
+      case RequestSpecifierEnum.RemoveAsset:
+        model.value = { [specifier.value]: { Any: null } };
+        break;
+
+      case RequestSpecifierEnum.AddNamedRule:
+        model.value = { [specifier.value]: null };
+        break;
+      case RequestSpecifierEnum.EditNamedRule:
+        model.value = { [specifier.value]: { Any: null } };
+        break;
+      case RequestSpecifierEnum.RemoveNamedRule:
+        model.value = { [specifier.value]: { Any: null } };
         break;
       default:
         unreachable(specifier.value);

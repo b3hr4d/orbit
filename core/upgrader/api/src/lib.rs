@@ -1,5 +1,8 @@
 use candid::{CandidType, Deserialize, Principal};
+use orbit_essentials::cdk::api::management_canister::main as mgmt;
 use orbit_essentials::types::WasmModuleExtraChunks;
+use orbit_essentials::utils::timestamp_to_rfc3339;
+use station_api::AccountSeedDTO;
 use station_api::TimestampRfc3339;
 pub use station_api::{MetadataDTO, UuidDTO};
 
@@ -10,11 +13,7 @@ pub struct UpgradeParams {
     pub module_extra_chunks: Option<WasmModuleExtraChunks>,
     #[serde(with = "serde_bytes")]
     pub arg: Vec<u8>,
-}
-
-#[derive(Clone, Debug, CandidType, serde::Serialize, Deserialize)]
-pub struct InitArg {
-    pub target_canister: Principal,
+    pub take_backup_snapshot: Option<bool>,
 }
 
 #[derive(Clone, Debug, CandidType, serde::Serialize, Deserialize)]
@@ -24,7 +23,25 @@ pub enum TriggerUpgradeError {
     UnexpectedError(String),
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, serde::Serialize, Deserialize)]
+pub struct RestoreParams {
+    #[serde(with = "serde_bytes")]
+    pub snapshot_id: Vec<u8>,
+}
+
+#[derive(Clone, Debug, CandidType, serde::Serialize, Deserialize)]
+pub enum TriggerRestoreError {
+    NotController,
+    Unauthorized,
+    UnexpectedError(String),
+}
+
+#[derive(Clone, Debug, CandidType, serde::Serialize, Deserialize)]
+pub struct InitArg {
+    pub target_canister: Principal,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub struct AdminUser {
     /// The user ID.
     pub id: UuidDTO,
@@ -34,7 +51,7 @@ pub struct AdminUser {
     pub identities: Vec<Principal>,
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub struct DisasterRecoveryCommittee {
     /// The users that are able to request disaster recovery.
     pub users: Vec<AdminUser>,
@@ -42,7 +59,7 @@ pub struct DisasterRecoveryCommittee {
     pub quorum: u16,
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub struct Account {
     /// The account id, which is a UUID.
     pub id: UuidDTO,
@@ -64,12 +81,49 @@ pub struct Account {
     pub metadata: Vec<MetadataDTO>,
 }
 
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
+pub struct Asset {
+    /// The asset id, which is a UUID.
+    pub id: UuidDTO,
+    /// The asset name (e.g. `Internet Computer`, `Bitcoin`, `Ethereum`, etc.)
+    pub name: String,
+    /// The asset symbol (e.g. `ICP`, `BTC`, `ETH`, etc.)
+    pub symbol: String,
+    /// The number of decimal places that the asset supports (e.g. `8` for `BTC`, `18` for `ETH`, etc.)
+    pub decimals: u32,
+    /// The blockchain identifier (e.g., `ethereum`, `bitcoin`, `icp`, etc.)
+    pub blockchain: String,
+    // The asset standard that is supported (e.g. `erc20`, `native`, etc.), canonically
+    // represented as a lowercase string with spaces replaced with underscores.
+    pub standards: Vec<String>,
+    /// The account metadata, which is a list of key-value pairs,
+    /// where the key is unique and the first entry in the tuple,
+    /// and the value is the second entry in the tuple.
+    pub metadata: Vec<MetadataDTO>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
+pub struct MultiAssetAccount {
+    /// The account id, which is a UUID.
+    pub id: UuidDTO,
+    /// The seed for address generation.
+    pub seed: AccountSeedDTO,
+    /// The account name.
+    pub name: String,
+    /// The account assets.
+    pub assets: Vec<UuidDTO>,
+    /// The account metadata, which is a list of key-value pairs,
+    /// where the key is unique and the first entry in the tuple,
+    /// and the value is the second entry in the tuple.
+    pub metadata: Vec<MetadataDTO>,
+}
+
 #[derive(Clone, Debug, CandidType)]
 pub enum DisasterRecoveryError {
     Unauthorized,
 }
 
-#[derive(Clone, Debug, CandidType)]
+#[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct IsCommitteeMemberResponse {
     pub is_committee_member: bool,
 }
@@ -77,6 +131,12 @@ pub struct IsCommitteeMemberResponse {
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct GetDisasterRecoveryAccountsResponse {
     pub accounts: Vec<Account>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct GetDisasterRecoveryAccountsAndAssetsResponse {
+    pub accounts: Vec<MultiAssetAccount>,
+    pub assets: Vec<Asset>,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -95,6 +155,12 @@ pub struct SetDisasterRecoveryAccountsInput {
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct SetDisasterRecoveryAccountsAndAssetsInput {
+    pub accounts: Vec<MultiAssetAccount>,
+    pub assets: Vec<Asset>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub enum InstallMode {
     /// Install the module.
     Install,
@@ -105,7 +171,7 @@ pub enum InstallMode {
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct RequestDisasterRecoveryInput {
+pub struct RequestDisasterRecoveryInstallCodeInput {
     #[serde(with = "serde_bytes")]
     pub module: Vec<u8>,
     pub module_extra_chunks: Option<WasmModuleExtraChunks>,
@@ -113,6 +179,53 @@ pub struct RequestDisasterRecoveryInput {
     pub arg: Vec<u8>,
 
     pub install_mode: InstallMode,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct RequestDisasterRecoverySnapshotInput {
+    pub replace_snapshot: Option<String>,
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct RequestDisasterRecoveryRestoreInput {
+    pub snapshot_id: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum RequestDisasterRecoveryPruneInput {
+    #[serde(rename = "snapshot")]
+    Snapshot(String),
+    #[serde(rename = "chunk_store")]
+    ChunkStore,
+    #[serde(rename = "state")]
+    State,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub enum RequestDisasterRecoveryInput {
+    InstallCode(RequestDisasterRecoveryInstallCodeInput),
+    Snapshot(RequestDisasterRecoverySnapshotInput),
+    Restore(RequestDisasterRecoveryRestoreInput),
+    Prune(RequestDisasterRecoveryPruneInput),
+    Start,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct Snapshot {
+    pub snapshot_id: String,
+    pub taken_at_timestamp: TimestampRfc3339,
+    pub total_size: u64,
+}
+
+impl From<mgmt::Snapshot> for Snapshot {
+    fn from(snapshot: mgmt::Snapshot) -> Snapshot {
+        Snapshot {
+            snapshot_id: hex::encode(&snapshot.id),
+            taken_at_timestamp: timestamp_to_rfc3339(&snapshot.taken_at_timestamp),
+            total_size: snapshot.total_size,
+        }
+    }
 }
 
 #[derive(CandidType, Deserialize, Debug, Clone)]
@@ -126,7 +239,7 @@ pub struct GetLogsInput {
     pub pagination: Option<PaginationInput>,
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub struct LogEntry {
     pub time: TimestampRfc3339,
     pub entry_type: String,
@@ -147,21 +260,57 @@ pub enum TriggerUpgradeResponse {
     Err(TriggerUpgradeError),
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
+pub struct StationRecoveryRequestInstallCodeOperation {
+    /// The install mode: upgrade or reinstall.
+    pub install_mode: InstallMode,
+    /// The SHA-256 hash of the wasm module.
+    pub wasm_sha256: Vec<u8>,
+    /// The install arguments.
+    pub arg: Vec<u8>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
+pub struct StationRecoveryRequestSnapshotOperation {
+    pub replace_snapshot: Option<String>,
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
+pub struct StationRecoveryRequestRestoreOperation {
+    pub snapshot_id: String,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
+pub enum StationRecoveryRequestPruneOperation {
+    #[serde(rename = "snapshot")]
+    Snapshot(String),
+    #[serde(rename = "chunk_store")]
+    ChunkStore,
+    #[serde(rename = "state")]
+    State,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
+pub enum StationRecoveryRequestOperation {
+    InstallCode(StationRecoveryRequestInstallCodeOperation),
+    Snapshot(StationRecoveryRequestSnapshotOperation),
+    Restore(StationRecoveryRequestRestoreOperation),
+    Prune(StationRecoveryRequestPruneOperation),
+    Start,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub struct StationRecoveryRequest {
     /// The user ID of the station.
     pub user_id: UuidDTO,
-    /// The SHA-256 hash of the wasm module.
-    pub wasm_sha256: Vec<u8>,
-    /// The install mode: upgrade or reinstall.
-    pub install_mode: InstallMode,
-    /// The install arguments.
-    pub arg: Vec<u8>,
+    /// The disaster recovery operation.
+    pub operation: StationRecoveryRequestOperation,
     /// Time in nanoseconds since the UNIX epoch when the request was submitted.
     pub submitted_at: TimestampRfc3339,
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub enum RecoveryStatus {
     /// There are no active recovery requests.
     Idle,
@@ -169,13 +318,13 @@ pub enum RecoveryStatus {
     InProgress { since: TimestampRfc3339 },
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub struct RecoveryFailure {
     /// The reason for the recovery failure.
     pub reason: String,
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
+#[derive(Clone, Debug, CandidType, Deserialize, PartialEq, Eq)]
 pub enum RecoveryResult {
     /// The recovery request was successful.
     Success,
@@ -187,6 +336,9 @@ pub enum RecoveryResult {
 pub struct GetDisasterRecoveryStateResponse {
     pub committee: Option<DisasterRecoveryCommittee>,
     pub accounts: Vec<Account>,
+
+    pub multi_asset_accounts: Vec<MultiAssetAccount>,
+    pub assets: Vec<Asset>,
 
     pub recovery_requests: Vec<StationRecoveryRequest>,
     pub recovery_status: RecoveryStatus,

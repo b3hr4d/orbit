@@ -1,4 +1,5 @@
 import { Certificate, HttpAgent, LookupStatus } from '@dfinity/agent';
+import { decode } from '@dfinity/agent/lib/cjs/cbor';
 import type { IDL as CandidIDL } from '@dfinity/candid';
 import { Principal } from '@dfinity/principal';
 import { toRaw } from 'vue';
@@ -79,11 +80,7 @@ export const throttle = <T extends (...args: unknown[]) => unknown>(fn: T, wait:
 };
 
 export const isSetAndNotFalse = (value: unknown) => {
-  if (value === 'false' || value === false || value === undefined || value === null) {
-    return false;
-  }
-
-  return true;
+  return !(value === 'false' || value === false || value === undefined || value === null);
 };
 
 export const isValidSha256 = (value: string): boolean => {
@@ -215,6 +212,9 @@ export const transformIdlWithOnlyVerifiedCalls = (
   };
 };
 
+const semanticVersionRegex =
+  /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<preRelease>[\w.]+))?(?:\+(?<build>[\w.]+))?$/;
+
 // Checks if a string is with the correct format for a semantic version.
 //
 // More information on semantic versioning can be found at: https://semver.org/
@@ -224,10 +224,87 @@ export const isSemanticVersion = (version: string, prefix = ''): boolean => {
     versionWithoutPrefix = version.slice(prefix.length);
   }
 
-  return /^((([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)$/.test(
-    versionWithoutPrefix,
-  );
+  return semanticVersionRegex.test(versionWithoutPrefix);
 };
+
+export class SemanticVersion {
+  constructor(
+    public major: number,
+    public minor: number,
+    public patch: number,
+    public preReleaseType?: string,
+    public preReleaseNumber?: number,
+    public build?: string,
+  ) {
+    if (major < 0 || minor < 0 || patch < 0) {
+      throw new Error('Version numbers must be positive');
+    }
+  }
+
+  static parse(version: string): SemanticVersion {
+    const match = version.match(semanticVersionRegex);
+    if (!match) {
+      throw new Error(`Invalid semantic version: ${version}`);
+    }
+
+    const [, major, minor, patch, preRelease, build] = match;
+    const [preReleaseType, preReleaseNumber] = preRelease?.split('.') ?? [undefined, undefined];
+
+    return new SemanticVersion(
+      Number(major),
+      Number(minor),
+      Number(patch),
+      preReleaseType,
+      preReleaseNumber !== undefined ? Number(preReleaseNumber) : 0,
+      build,
+    );
+  }
+
+  public toString(): string {
+    const preRelease = this.preReleaseType
+      ? `-${this.preReleaseType}${this.preReleaseNumber ?? 0}`
+      : '';
+    const build = this.build ? `+${this.build}` : '';
+    return `${this.major}.${this.minor}.${this.patch}${preRelease}${build}`;
+  }
+
+  public compare(other: SemanticVersion): number {
+    // Compare major, minor, and patch versions
+    if (this.major !== other.major) return this.major - other.major;
+    if (this.minor !== other.minor) return this.minor - other.minor;
+    if (this.patch !== other.patch) return this.patch - other.patch;
+
+    // Compare pre-release types and numbers
+    if (this.preReleaseType || other.preReleaseType) {
+      if (!this.preReleaseType) return 1; // No pre-release means higher precedence
+      if (!other.preReleaseType) return -1;
+      const typeComparison = this.preReleaseType.localeCompare(other.preReleaseType);
+      if (typeComparison !== 0) return typeComparison;
+
+      // Compare pre-release numbers
+      const thisNumber = this.preReleaseNumber ?? 0;
+      const otherNumber = other.preReleaseNumber ?? 0;
+      if (thisNumber !== otherNumber) return thisNumber - otherNumber;
+    }
+
+    // As per semver spec, Build metadata MUST be ignored when determining version precedence.
+    // https://semver.org/#spec-item-10
+
+    return 0;
+  }
+
+  public isGreaterThan(other: SemanticVersion): boolean {
+    return this.compare(other) > 0;
+  }
+
+  public isLessThan(other: SemanticVersion): boolean {
+    return this.compare(other) < 0;
+  }
+
+  public isEqualTo(other: SemanticVersion): boolean {
+    return this.compare(other) === 0;
+  }
+}
 
 export const removeBasePathFromPathname = (pathname: string, basePath: string): string => {
   const updatedPath = pathname.startsWith(basePath) ? pathname.slice(basePath.length) : pathname;
@@ -251,6 +328,7 @@ export const toUint8Array = (input: ArrayBuffer | number[] | Uint8Array): Uint8A
  * Removes all null and undefined values from an array and returns a new array.
  *
  * @param array - The array to compact.
+ * @param opts
  * @returns A new array with all null and undefined values removed.
  */
 export const compactArray = <T, R = T>(
@@ -326,7 +404,7 @@ export const parseToBigIntOrUndefined = (
     }
 
     return BigInt(value);
-  } catch (error) {
+  } catch (_error) {
     return undefined;
   }
 };
@@ -371,7 +449,7 @@ export async function fetchCanisterModuleHash(
   const certificate = await Certificate.create({
     canisterId,
     certificate: state.certificate,
-    rootKey: agent.rootKey,
+    rootKey: agent.rootKey!,
   });
 
   const moduleHash = certificate.lookup(moduleHashPath);
@@ -385,6 +463,42 @@ export async function fetchCanisterModuleHash(
   }
 
   return arrayBufferToHex(moduleHash.value);
+}
+
+export async function fetchCanisterControllers(
+  agent: HttpAgent,
+  canisterId: Principal,
+): Promise<Principal[] | null> {
+  const encoder = new TextEncoder();
+  const controllersPath: ArrayBuffer[] = [
+    encoder.encode('canister'),
+    canisterId.toUint8Array(),
+    encoder.encode('controllers'),
+  ];
+
+  const state = await agent.readState(canisterId, {
+    paths: [controllersPath],
+  });
+
+  const certificate = await Certificate.create({
+    canisterId,
+    certificate: state.certificate,
+    rootKey: agent.rootKey!,
+  });
+
+  const controllers = certificate.lookup(controllersPath);
+
+  if (controllers.status !== LookupStatus.Found) {
+    return null;
+  }
+
+  if (!(controllers.value instanceof ArrayBuffer)) {
+    throw new Error('Controllers value is not an ArrayBuffer');
+  }
+
+  const cbor = decode<Uint8Array[]>(controllers.value);
+
+  return cbor.map(controller => Principal.fromUint8Array(controller));
 }
 
 /**
@@ -525,7 +639,7 @@ export const transformData = (
   const normalizedInput = normalize(input);
 
   if (typeof normalizedInput === 'object' || Array.isArray(normalizedInput)) {
-    const plainJson = JSON.parse(
+    return JSON.parse(
       JSON.stringify(normalizedInput, (_, value) => {
         // Json stringify takes care of removing all keys with undefined values, so we only need to remove null values.
         if (removeUndefinedOrNull && value === null) {
@@ -535,12 +649,20 @@ export const transformData = (
         return value;
       }),
     );
-
-    return plainJson;
   }
 
   return normalizedInput;
 };
+
+export function hexStringToUint8Array(input: string) {
+  const result = new Uint8Array(input.length / 2);
+
+  for (let i = 0; i < input.length; i += 2) {
+    result[i / 2] = parseInt(input.slice(i, i + 2), 16);
+  }
+
+  return result;
+}
 
 /**
  * Deep clones the input data using structured cloning, if Proxy objects are found they are
@@ -574,6 +696,7 @@ export function deepClone<T>(input: T): T {
  * @param debouncedFunction The function to debounce.
  * @param wait The time to wait before calling the debounced function. @default 500
  *
+ * @param opts
  * @returns The debounced function.
  */
 export const debounce = <T extends (...args: Parameters<T>) => ReturnType<T>>(

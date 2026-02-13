@@ -18,6 +18,8 @@ import { hasRequiredPrivilege, hasRequiredSession } from '~/utils/auth.utils';
 import { i18n, i18nRouteGuard } from './i18n.plugin';
 import { initStateGuard } from './pinia.plugin';
 import { services } from './services.plugin';
+import DashboardPage from '~/pages/DashboardPage.vue';
+import DisasterRecoveryPage from '~/pages/DisasterRecoveryPage.vue';
 
 export const redirectToKey = 'redirectTo';
 
@@ -49,6 +51,18 @@ const router = createRouter({
             auth: {
               check: {
                 session: RequiredSessionState.Guest,
+              },
+            },
+          },
+        },
+        {
+          path: 'dashboard',
+          name: Routes.Dashboard,
+          component: DashboardPage,
+          meta: {
+            auth: {
+              check: {
+                session: RequiredSessionState.ConnectedToStation,
               },
             },
           },
@@ -87,16 +101,7 @@ const router = createRouter({
             },
             {
               path: ':id',
-              name: Routes.Account,
-              component: () => import('~/pages/AccountPage.vue'),
-              props: () => {
-                return {
-                  breadcrumbs: [
-                    { title: i18n.global.t('navigation.home'), to: { name: defaultHomeRoute } },
-                    { title: i18n.global.t('navigation.accounts'), to: { name: Routes.Accounts } },
-                  ],
-                };
-              },
+              component: RouterView,
               meta: {
                 auth: {
                   check: {
@@ -105,6 +110,44 @@ const router = createRouter({
                   },
                 },
               },
+              children: [
+                {
+                  path: '',
+                  name: Routes.Account,
+                  component: () => import('~/pages/AccountPage.vue'),
+                  props: () => {
+                    return {
+                      breadcrumbs: [
+                        { title: i18n.global.t('navigation.home'), to: { name: defaultHomeRoute } },
+                        {
+                          title: i18n.global.t('navigation.accounts'),
+                          to: { name: Routes.Accounts },
+                        },
+                      ],
+                    };
+                  },
+                },
+                {
+                  path: ':assetId',
+                  name: Routes.AccountAsset,
+                  component: () => import('~/pages/AccountAssetPage.vue'),
+                  props: params => {
+                    return {
+                      breadcrumbs: [
+                        { title: i18n.global.t('navigation.home'), to: { name: defaultHomeRoute } },
+                        {
+                          title: i18n.global.t('navigation.accounts'),
+                          to: { name: Routes.Accounts },
+                        },
+                        {
+                          title: i18n.global.t('navigation.account'),
+                          to: { name: Routes.Account, params: { id: params.params.id } },
+                        },
+                      ],
+                    };
+                  },
+                },
+              ],
             },
           ],
         },
@@ -373,16 +416,16 @@ const router = createRouter({
               },
             },
             {
-              path: 'policies',
-              name: Routes.RequestPolicies,
-              component: () => import('~/pages/RequestPoliciesPage.vue'),
+              path: 'approval-rules',
+              name: Routes.ApprovalRules,
+              component: () => import('~/pages/ApprovalRulesPage.vue'),
               props: () => {
                 return {
-                  title: i18n.global.t('pages.request_policies.title'),
+                  title: i18n.global.t('pages.approval_rules.title'),
                   breadcrumbs: [
                     { title: i18n.global.t('navigation.home'), to: { name: defaultHomeRoute } },
                     { title: i18n.global.t('navigation.settings') },
-                    { title: i18n.global.t('navigation.request_policies') },
+                    { title: i18n.global.t('navigation.approval_rules') },
                   ],
                 };
               },
@@ -390,7 +433,31 @@ const router = createRouter({
                 auth: {
                   check: {
                     session: RequiredSessionState.ConnectedToStation,
-                    privileges: [Privilege.ListRequestPolicies],
+                    privileges: [Privilege.ListRequestPolicies, Privilege.ListNamedRules],
+                  },
+                },
+              },
+            },
+
+            {
+              path: 'assets',
+              name: Routes.Assets,
+              component: () => import('~/pages/AssetsPage.vue'),
+              props: () => {
+                return {
+                  title: i18n.global.t('pages.assets.title'),
+                  breadcrumbs: [
+                    { title: i18n.global.t('navigation.home'), to: { name: defaultHomeRoute } },
+                    { title: i18n.global.t('navigation.settings') },
+                    { title: i18n.global.t('navigation.assets') },
+                  ],
+                };
+              },
+              meta: {
+                auth: {
+                  check: {
+                    session: RequiredSessionState.ConnectedToStation,
+                    privileges: [Privilege.ListAssets],
                   },
                 },
               },
@@ -419,6 +486,18 @@ const router = createRouter({
               check: {
                 session: RequiredSessionState.ConnectedToStation,
                 privileges: [Privilege.ListAddressBookEntries],
+              },
+            },
+          },
+        },
+        {
+          path: 'disaster-recovery',
+          name: Routes.DisasterRecovery,
+          component: DisasterRecoveryPage,
+          meta: {
+            auth: {
+              check: {
+                session: RequiredSessionState.Authenticated,
               },
             },
           },

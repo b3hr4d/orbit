@@ -1,10 +1,9 @@
 <template>
   <VCard
-    :elevation="props.mode === 'grid' ? 0 : undefined"
     density="compact"
     :min-width="props.minWith"
+    :elevation="props.mode === 'grid' ? 0 : undefined"
     :rounded="props.mode === 'grid' ? 0 : undefined"
-    :class="{ 'br-on-background': props.mode === 'grid' }"
   >
     <VCardTitle v-if="props.showTitle" class="text-body-2 font-weight-bold">
       {{
@@ -46,6 +45,7 @@ import { KeysOfUnion } from '~/utils/helper.utils';
 import RequestStatusChip from './RequestStatusChip.vue';
 import ReviewRequestBtn from './ReviewRequestBtn.vue';
 import AddAccountOperation from './operations/AddAccountOperation.vue';
+import AddAssetOperation from './operations/AddAssetOperation.vue';
 import AddAddressBookEntryOperation from './operations/AddAddressBookEntryOperation.vue';
 import AddRequestPolicyOperation from './operations/AddRequestPolicyOperation.vue';
 import AddUserGroupOperation from './operations/AddUserGroupOperation.vue';
@@ -64,7 +64,12 @@ import RemoveUserGroupOperation from './operations/RemoveUserGroupOperation.vue'
 import SystemUpgradeOperation from './operations/SystemUpgradeOperation.vue';
 import TransferOperation from './operations/TransferOperation.vue';
 import UnsupportedOperation from './operations/UnsupportedOperation.vue';
-
+import EditAssetOperation from './operations/EditAssetOperation.vue';
+import RemoveAssetOperation from './operations/RemoveAssetOperation.vue';
+import AddNamedRuleOperation from './operations/AddNamedRuleOperation.vue';
+import EditNamedRuleOperation from './operations/EditNamedRuleOperation.vue';
+import RemoveNamedRuleOperation from './operations/RemoveNamedRuleOperation.vue';
+import SetDisasterRecoveryOperation from './operations/SetDisasterRecoveryOperation.vue';
 const props = withDefaults(
   defineProps<{
     request: Request;
@@ -103,11 +108,24 @@ const componentsMap: {
   EditPermission: EditPermissionOperation,
   ManageSystemInfo: ManageSystemInfoOperation,
   CallExternalCanister: CallExternalCanisterOperation,
+  AddAsset: AddAssetOperation,
+  EditAsset: EditAssetOperation,
+  RemoveAsset: RemoveAssetOperation,
+  AddNamedRule: AddNamedRuleOperation,
+  EditNamedRule: EditNamedRuleOperation,
+  RemoveNamedRule: RemoveNamedRuleOperation,
+  SetDisasterRecovery: SetDisasterRecoveryOperation,
+
+  // below variants are not supported yet
   ChangeExternalCanister: UnsupportedOperation,
   CreateExternalCanister: UnsupportedOperation,
   ConfigureExternalCanister: UnsupportedOperation,
-  SetDisasterRecovery: UnsupportedOperation,
   FundExternalCanister: UnsupportedOperation,
+  MonitorExternalCanister: UnsupportedOperation,
+  PruneExternalCanister: UnsupportedOperation,
+  RestoreExternalCanister: UnsupportedOperation,
+  SnapshotExternalCanister: UnsupportedOperation,
+  SystemRestore: UnsupportedOperation,
 };
 
 defineEmits<{

@@ -3,13 +3,16 @@ use crate::{
     errors::{RequestError, RequestExecuteError},
     models::{Request, RequestOperation},
     services::{
-        permission::PERMISSION_SERVICE, CHANGE_CANISTER_SERVICE, DISASTER_RECOVERY_SERVICE,
-        EXTERNAL_CANISTER_SERVICE, REQUEST_POLICY_SERVICE, SYSTEM_SERVICE,
+        permission::PERMISSION_SERVICE, CHANGE_CANISTER_SERVICE, EXTERNAL_CANISTER_SERVICE,
+        REQUEST_POLICY_SERVICE, SYSTEM_SERVICE,
     },
 };
 use async_trait::async_trait;
 use fund_external_canister::{
     FundExternalCanisterRequestCreate, FundExternalCanisterRequestExecute,
+};
+use monitor_external_canister::{
+    MonitorExternalCanisterRequestCreate, MonitorExternalCanisterRequestExecute,
 };
 use orbit_essentials::types::UUID;
 use set_disaster_recovery::SetDisasterRecoveryRequestCreate;
@@ -18,6 +21,8 @@ use std::sync::Arc;
 
 mod add_account;
 mod add_address_book_entry;
+mod add_asset;
+mod add_named_rule;
 mod add_request_policy;
 mod add_user;
 mod add_user_group;
@@ -27,16 +32,25 @@ mod configure_external_canister;
 mod create_canister;
 mod edit_account;
 mod edit_address_book_entry;
+mod edit_asset;
+mod edit_named_rule;
 mod edit_permission;
 mod edit_request_policy;
 mod edit_user;
 mod edit_user_group;
 mod fund_external_canister;
 mod manage_system_info;
+mod monitor_external_canister;
+mod prune_external_canister;
 mod remove_address_book_entry;
+mod remove_asset;
+mod remove_named_rule;
 mod remove_request_policy;
 mod remove_user_group;
+mod restore_external_canister;
 mod set_disaster_recovery;
+mod snapshot_external_canister;
+mod system_restore;
 mod system_upgrade;
 mod transfer;
 
@@ -62,11 +76,18 @@ use self::{
     edit_request_policy::{EditRequestPolicyRequestCreate, EditRequestPolicyRequestExecute},
     edit_user::{EditUserRequestCreate, EditUserRequestExecute},
     edit_user_group::{EditUserGroupRequestCreate, EditUserGroupRequestExecute},
+    prune_external_canister::PruneExternalCanisterRequestCreate,
+    prune_external_canister::PruneExternalCanisterRequestExecute,
     remove_address_book_entry::{
         RemoveAddressBookEntryRequestCreate, RemoveAddressBookEntryRequestExecute,
     },
     remove_request_policy::{RemoveRequestPolicyRequestCreate, RemoveRequestPolicyRequestExecute},
     remove_user_group::{RemoveUserGroupRequestCreate, RemoveUserGroupRequestExecute},
+    restore_external_canister::RestoreExternalCanisterRequestCreate,
+    restore_external_canister::RestoreExternalCanisterRequestExecute,
+    snapshot_external_canister::SnapshotExternalCanisterRequestCreate,
+    snapshot_external_canister::SnapshotExternalCanisterRequestExecute,
+    system_restore::{SystemRestoreRequestCreate, SystemRestoreRequestExecute},
     system_upgrade::{SystemUpgradeRequestCreate, SystemUpgradeRequestExecute},
     transfer::{TransferRequestCreate, TransferRequestExecute},
 };
@@ -179,6 +200,12 @@ impl RequestFactory {
                     .create(id, requested_by_user, input.clone(), operation.clone())
                     .await
             }
+            RequestOperationInput::SystemRestore(operation) => {
+                let creator = Box::new(SystemRestoreRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
             RequestOperationInput::SetDisasterRecovery(operation) => {
                 let creator = Box::new(SetDisasterRecoveryRequestCreate {});
                 creator
@@ -193,6 +220,13 @@ impl RequestFactory {
             }
             RequestOperationInput::FundExternalCanister(operation) => {
                 let creator = Box::new(FundExternalCanisterRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+
+            RequestOperationInput::MonitorExternalCanister(operation) => {
+                let creator = Box::new(MonitorExternalCanisterRequestCreate {});
                 creator
                     .create(id, requested_by_user, input.clone(), operation.clone())
                     .await
@@ -213,6 +247,24 @@ impl RequestFactory {
                 let creator = Box::new(CallExternalCanisterRequestCreate {
                     external_canister_service: Arc::clone(&EXTERNAL_CANISTER_SERVICE),
                 });
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::SnapshotExternalCanister(operation) => {
+                let creator = Box::new(SnapshotExternalCanisterRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::RestoreExternalCanister(operation) => {
+                let creator = Box::new(RestoreExternalCanisterRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::PruneExternalCanister(operation) => {
+                let creator = Box::new(PruneExternalCanisterRequestCreate {});
                 creator
                     .create(id, requested_by_user, input.clone(), operation.clone())
                     .await
@@ -243,6 +295,43 @@ impl RequestFactory {
             }
             RequestOperationInput::ManageSystemInfo(operation) => {
                 let creator = Box::new(manage_system_info::ManageSystemInfoRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::AddAsset(operation) => {
+                let creator = Box::new(add_asset::AddAssetRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::EditAsset(operation) => {
+                let creator = Box::new(edit_asset::EditAssetRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::RemoveAsset(operation) => {
+                let creator = Box::new(remove_asset::RemoveAssetRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+
+            RequestOperationInput::AddNamedRule(operation) => {
+                let creator = Box::new(add_named_rule::AddNamedRuleRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::EditNamedRule(operation) => {
+                let creator = Box::new(edit_named_rule::EditNamedRuleRequestCreate {});
+                creator
+                    .create(id, requested_by_user, input.clone(), operation.clone())
+                    .await
+            }
+            RequestOperationInput::RemoveNamedRule(operation) => {
+                let creator = Box::new(remove_named_rule::RemoveNamedRuleRequestCreate {});
                 creator
                     .create(id, requested_by_user, input.clone(), operation.clone())
                     .await
@@ -288,14 +377,12 @@ impl RequestFactory {
             RequestOperation::SetDisasterRecovery(operation) => Box::new(
                 set_disaster_recovery::SetDisasterRecoveryRequestExecute::new(request, operation),
             ),
-            RequestOperation::SystemUpgrade(operation) => {
-                Box::new(SystemUpgradeRequestExecute::new(
-                    request,
-                    operation,
-                    Arc::clone(&SYSTEM_SERVICE),
-                    Arc::clone(&DISASTER_RECOVERY_SERVICE),
-                ))
-            }
+            RequestOperation::SystemUpgrade(operation) => Box::new(
+                SystemUpgradeRequestExecute::new(request, operation, Arc::clone(&SYSTEM_SERVICE)),
+            ),
+            RequestOperation::SystemRestore(operation) => Box::new(
+                SystemRestoreRequestExecute::new(request, operation, Arc::clone(&SYSTEM_SERVICE)),
+            ),
             RequestOperation::ChangeExternalCanister(operation) => {
                 Box::new(ChangeExternalCanisterRequestExecute::new(
                     request,
@@ -331,6 +418,31 @@ impl RequestFactory {
                     Arc::clone(&EXTERNAL_CANISTER_SERVICE),
                 ))
             }
+            RequestOperation::MonitorExternalCanister(operation) => {
+                Box::new(MonitorExternalCanisterRequestExecute::new(
+                    request,
+                    operation,
+                    Arc::clone(&EXTERNAL_CANISTER_SERVICE),
+                ))
+            }
+            RequestOperation::SnapshotExternalCanister(operation) => {
+                Box::new(SnapshotExternalCanisterRequestExecute::new(
+                    operation,
+                    Arc::clone(&CHANGE_CANISTER_SERVICE),
+                ))
+            }
+            RequestOperation::RestoreExternalCanister(operation) => {
+                Box::new(RestoreExternalCanisterRequestExecute::new(
+                    operation,
+                    Arc::clone(&CHANGE_CANISTER_SERVICE),
+                ))
+            }
+            RequestOperation::PruneExternalCanister(operation) => {
+                Box::new(PruneExternalCanisterRequestExecute::new(
+                    operation,
+                    Arc::clone(&CHANGE_CANISTER_SERVICE),
+                ))
+            }
             RequestOperation::EditPermission(operation) => {
                 Box::new(EditPermissionRequestExecute::new(
                     request,
@@ -362,6 +474,24 @@ impl RequestFactory {
             RequestOperation::ManageSystemInfo(operation) => Box::new(
                 manage_system_info::ManageSystemInfoRequestExecute::new(request, operation),
             ),
+            RequestOperation::AddAsset(operation) => {
+                Box::new(add_asset::AddAssetRequestExecute::new(request, operation))
+            }
+            RequestOperation::EditAsset(operation) => {
+                Box::new(edit_asset::EditAssetRequestExecute::new(request, operation))
+            }
+            RequestOperation::RemoveAsset(operation) => Box::new(
+                remove_asset::RemoveAssetRequestExecute::new(request, operation),
+            ),
+            RequestOperation::AddNamedRule(operation) => Box::new(
+                add_named_rule::AddNamedRuleRequestExecute::new(request, operation),
+            ),
+            RequestOperation::EditNamedRule(operation) => Box::new(
+                edit_named_rule::EditNamedRuleRequestExecute::new(request, operation),
+            ),
+            RequestOperation::RemoveNamedRule(operation) => Box::new(
+                remove_named_rule::RemoveNamedRuleRequestExecute::new(request, operation),
+            ),
         }
     }
 }
@@ -376,6 +506,9 @@ pub mod requests_test_utils {
             title: None,
             summary: None,
             execution_plan: None,
+            expiration_dt: None,
+            deduplication_key: None,
+            tags: None,
         }
     }
 }

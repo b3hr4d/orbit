@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::utils::HelperMapper;
 
 #[storable]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum InstallMode {
     /// Install the wasm module.
     Install,
@@ -63,22 +63,96 @@ impl From<InstallMode> for CanisterInstallMode {
 }
 
 #[storable]
-#[derive(Clone, Debug)]
-pub struct StationRecoveryRequest {
-    /// The user ID of the station.
-    pub user_id: UUID,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StationRecoveryRequestInstallCodeOperation {
+    /// The install mode: upgrade or reinstall.
+    pub install_mode: InstallMode,
     /// The wasm module to be installed.
+    #[serde(with = "serde_bytes")]
     pub wasm_module: Vec<u8>,
     /// Optional extra chunks of the wasm module to be installed.
     pub wasm_module_extra_chunks: Option<WasmModuleExtraChunks>,
     /// The SHA-256 hash of the wasm module.
     pub wasm_sha256: Vec<u8>,
-    /// The install mode: upgrade or reinstall.
-    pub install_mode: InstallMode,
     /// The install arguments.
+    #[serde(with = "serde_bytes")]
     pub arg: Vec<u8>,
     /// The SHA-256 hash of the install arguments.
     pub arg_sha256: Vec<u8>,
+}
+
+#[storable]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StationRecoveryRequestSnapshotOperation {
+    pub replace_snapshot: Option<Vec<u8>>,
+    pub force: bool,
+}
+
+#[storable]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StationRecoveryRequestRestoreOperation {
+    pub snapshot_id: Vec<u8>,
+}
+
+#[storable]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StationRecoveryRequestPruneOperation {
+    Snapshot(Vec<u8>),
+    ChunkStore,
+    State,
+}
+
+#[storable]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StationRecoveryRequestOperation {
+    InstallCode(StationRecoveryRequestInstallCodeOperation),
+    Snapshot(StationRecoveryRequestSnapshotOperation),
+    Restore(StationRecoveryRequestRestoreOperation),
+    Prune(StationRecoveryRequestPruneOperation),
+    Start,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct StationRecoveryRequestInstallCodeOperationFootprint {
+    pub install_mode: InstallMode,
+    pub wasm_sha256: Vec<u8>,
+    pub arg_sha256: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct StationRecoveryRequestSnapshotOperationFootprint {
+    pub replace_snapshot: Option<Vec<u8>>,
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct StationRecoveryRequestRestoreOperationFootprint {
+    pub snapshot_id: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum StationRecoveryRequestPruneOperationFootprint {
+    Snapshot(String),
+    ChunkStore,
+    State,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum StationRecoveryRequestOperationFootprint {
+    InstallCode(StationRecoveryRequestInstallCodeOperationFootprint),
+    Snapshot(StationRecoveryRequestSnapshotOperationFootprint),
+    Restore(StationRecoveryRequestRestoreOperationFootprint),
+    Prune(StationRecoveryRequestPruneOperationFootprint),
+    Start,
+}
+
+#[storable]
+#[derive(Clone, Debug)]
+pub struct StationRecoveryRequest {
+    /// The user ID of the station.
+    pub user_id: UUID,
+    /// The disaster recovery operation.
+    pub operation: StationRecoveryRequestOperation,
     /// Time in nanoseconds since the UNIX epoch when the request was submitted.
     pub submitted_at: Timestamp,
 }
@@ -87,9 +161,7 @@ impl From<StationRecoveryRequest> for upgrader_api::StationRecoveryRequest {
     fn from(value: StationRecoveryRequest) -> Self {
         upgrader_api::StationRecoveryRequest {
             user_id: Uuid::from_bytes(value.user_id).hyphenated().to_string(),
-            wasm_sha256: value.wasm_sha256,
-            install_mode: upgrader_api::InstallMode::from(value.install_mode),
-            arg: value.arg,
+            operation: (&value.operation).into(),
             submitted_at: timestamp_to_rfc3339(&value.submitted_at),
         }
     }
@@ -248,6 +320,62 @@ impl From<AdminUser> for upgrader_api::AdminUser {
 
 #[storable]
 #[derive(Clone, Debug)]
+pub struct Asset {
+    /// The asset id, which is a UUID.
+    pub id: UUID,
+    /// The asset name (e.g. `Internet Computer`, `Bitcoin`, `Ethereum`, etc.)
+    pub name: String,
+    /// The asset symbol (e.g. `ICP`, `BTC`, `ETH`, etc.)
+    pub symbol: String,
+    /// The number of decimal places that the asset supports (e.g. `8` for `BTC`, `18` for `ETH`, etc.)
+    pub decimals: u32,
+    /// The blockchain identifier (e.g., `ethereum`, `bitcoin`, `icp`, etc.)
+    pub blockchain: String,
+    // The asset standard that is supported (e.g. `erc20`, `native`, etc.), canonically
+    // represented as a lowercase string with spaces replaced with underscores.
+    pub standards: Vec<String>,
+    /// The account metadata, which is a list of key-value pairs,
+    /// where the key is unique and the first entry in the tuple,
+    /// and the value is the second entry in the tuple.
+    pub metadata: Vec<Metadata>,
+}
+
+impl From<upgrader_api::Asset> for Asset {
+    fn from(value: upgrader_api::Asset) -> Self {
+        Asset {
+            id: *HelperMapper::to_uuid(value.id)
+                .expect("Invalid asset ID")
+                .as_bytes(),
+            name: value.name,
+            symbol: value.symbol,
+            decimals: value.decimals,
+            blockchain: value.blockchain,
+            standards: value.standards,
+            metadata: value.metadata.into_iter().map(Metadata::from).collect(),
+        }
+    }
+}
+
+impl From<Asset> for upgrader_api::Asset {
+    fn from(value: Asset) -> Self {
+        upgrader_api::Asset {
+            id: Uuid::from_bytes(value.id).hyphenated().to_string(),
+            name: value.name,
+            symbol: value.symbol,
+            decimals: value.decimals,
+            blockchain: value.blockchain,
+            standards: value.standards,
+            metadata: value
+                .metadata
+                .into_iter()
+                .map(upgrader_api::MetadataDTO::from)
+                .collect(),
+        }
+    }
+}
+
+#[storable]
+#[derive(Clone, Debug)]
 pub struct Account {
     /// The account id, which is a UUID.
     pub id: UUID,
@@ -263,6 +391,24 @@ pub struct Account {
     pub decimals: u32,
     /// The account name (e.g. `My Main Account`)
     pub name: String,
+    /// The account metadata, which is a list of key-value pairs,
+    /// where the key is unique and the first entry in the tuple,
+    /// and the value is the second entry in the tuple.
+    pub metadata: Vec<Metadata>,
+}
+
+type AccountSeed = [u8; 16];
+#[storable]
+#[derive(Clone, Debug)]
+pub struct MultiAssetAccount {
+    /// The account id, which is a UUID.
+    pub id: UUID,
+    /// The blockchain type (e.g. `icp`, `eth`, `btc`)
+    pub name: String,
+    /// The address generation seed.
+    pub seed: AccountSeed,
+    /// Assets
+    pub assets: Vec<UUID>,
     /// The account metadata, which is a list of key-value pairs,
     /// where the key is unique and the first entry in the tuple,
     /// and the value is the second entry in the tuple.
@@ -305,10 +451,58 @@ impl From<Account> for upgrader_api::Account {
     }
 }
 
+impl From<upgrader_api::MultiAssetAccount> for MultiAssetAccount {
+    fn from(value: upgrader_api::MultiAssetAccount) -> Self {
+        MultiAssetAccount {
+            id: *HelperMapper::to_uuid(value.id)
+                .expect("Invalid account ID")
+                .as_bytes(),
+            assets: value
+                .assets
+                .into_iter()
+                .map(|asset_id| {
+                    *HelperMapper::to_uuid(asset_id)
+                        .expect("Invalid asset ID")
+                        .as_bytes()
+                })
+                .collect(),
+            seed: value.seed,
+            name: value.name,
+            metadata: value.metadata.into_iter().map(Metadata::from).collect(),
+        }
+    }
+}
+
+impl From<MultiAssetAccount> for upgrader_api::MultiAssetAccount {
+    fn from(value: MultiAssetAccount) -> Self {
+        upgrader_api::MultiAssetAccount {
+            id: Uuid::from_bytes(value.id).hyphenated().to_string(),
+            name: value.name,
+            seed: value.seed,
+            assets: value
+                .assets
+                .into_iter()
+                .map(|asset_id| Uuid::from_bytes(asset_id).hyphenated().to_string())
+                .collect(),
+            metadata: value
+                .metadata
+                .into_iter()
+                .map(upgrader_api::MetadataDTO::from)
+                .collect(),
+        }
+    }
+}
+
 #[storable]
 #[derive(Clone, Debug)]
 pub struct DisasterRecovery {
     pub accounts: Vec<Account>,
+
+    #[serde(default)]
+    pub multi_asset_accounts: Vec<MultiAssetAccount>,
+    #[serde(default)]
+    pub assets: Vec<Asset>,
+
     pub committee: Option<DisasterRecoveryCommittee>,
 
     pub recovery_requests: Vec<StationRecoveryRequest>,
@@ -320,6 +514,8 @@ impl Default for DisasterRecovery {
     fn default() -> Self {
         DisasterRecovery {
             accounts: vec![],
+            multi_asset_accounts: vec![],
+            assets: vec![],
             committee: None,
             recovery_requests: vec![],
             recovery_status: RecoveryStatus::Idle,
@@ -336,6 +532,18 @@ impl From<DisasterRecovery> for upgrader_api::GetDisasterRecoveryStateResponse {
                 .into_iter()
                 .map(upgrader_api::Account::from)
                 .collect(),
+
+            multi_asset_accounts: value
+                .multi_asset_accounts
+                .into_iter()
+                .map(upgrader_api::MultiAssetAccount::from)
+                .collect(),
+            assets: value
+                .assets
+                .into_iter()
+                .map(upgrader_api::Asset::from)
+                .collect(),
+
             committee: value
                 .committee
                 .map(upgrader_api::DisasterRecoveryCommittee::from),
@@ -350,11 +558,46 @@ impl From<DisasterRecovery> for upgrader_api::GetDisasterRecoveryStateResponse {
     }
 }
 
+// legacy types
+
+#[storable]
+#[derive(Clone, Debug)]
+pub struct StationRecoveryRequestV0 {
+    /// The user ID of the station.
+    pub user_id: UUID,
+    /// The wasm module to be installed.
+    #[serde(with = "serde_bytes")]
+    pub wasm_module: Vec<u8>,
+    /// Optional extra chunks of the wasm module to be installed.
+    pub wasm_module_extra_chunks: Option<WasmModuleExtraChunks>,
+    /// The SHA-256 hash of the wasm module.
+    pub wasm_sha256: Vec<u8>,
+    /// The install mode: upgrade or reinstall.
+    pub install_mode: InstallMode,
+    /// The install arguments.
+    #[serde(with = "serde_bytes")]
+    pub arg: Vec<u8>,
+    /// The SHA-256 hash of the install arguments.
+    pub arg_sha256: Vec<u8>,
+    /// Time in nanoseconds since the UNIX epoch when the request was submitted.
+    pub submitted_at: Timestamp,
+}
+
 #[cfg(test)]
-pub mod test {
+pub mod tests {
     use candid::Principal;
 
+    use crate::model::{Asset, MultiAssetAccount};
+
     use super::{Account, AdminUser, DisasterRecoveryCommittee};
+
+    pub fn mock_committee_member() -> Principal {
+        Principal::from_slice(&[1; 29])
+    }
+
+    pub fn mock_non_committee_member() -> Principal {
+        Principal::from_slice(&[20; 29])
+    }
 
     pub fn mock_committee() -> DisasterRecoveryCommittee {
         DisasterRecoveryCommittee {
@@ -362,7 +605,7 @@ pub mod test {
                 AdminUser {
                     id: [1; 16],
                     name: "admin_user_1".to_owned(),
-                    identities: vec![Principal::from_slice(&[1; 29])],
+                    identities: vec![mock_committee_member()],
                 },
                 AdminUser {
                     id: [2; 16],
@@ -399,6 +642,48 @@ pub mod test {
                 symbol: "ETH".to_owned(),
                 decimals: 18,
                 name: "Secondary Account".to_owned(),
+                metadata: vec![],
+            },
+        ]
+    }
+
+    pub fn mock_multi_asset_accounts() -> Vec<MultiAssetAccount> {
+        vec![
+            MultiAssetAccount {
+                id: [1; 16],
+                assets: vec![[1; 16], [2; 16]],
+                seed: [0; 16],
+                name: "Main Account".to_owned(),
+                metadata: vec![],
+            },
+            MultiAssetAccount {
+                id: [2; 16],
+                assets: vec![[1; 16]],
+                seed: [0; 16],
+                name: "Secondary Account".to_owned(),
+                metadata: vec![],
+            },
+        ]
+    }
+
+    pub fn mock_assets() -> Vec<Asset> {
+        vec![
+            Asset {
+                id: [1; 16],
+                name: "Internet Computer".to_owned(),
+                symbol: "ICP".to_owned(),
+                decimals: 8,
+                blockchain: "icp".to_owned(),
+                standards: vec!["icp_native".to_owned()],
+                metadata: vec![],
+            },
+            Asset {
+                id: [2; 16],
+                name: "Ethereum".to_owned(),
+                symbol: "ETH".to_owned(),
+                decimals: 18,
+                blockchain: "eth".to_owned(),
+                standards: vec!["erc20".to_owned()],
                 metadata: vec![],
             },
         ]

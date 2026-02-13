@@ -1,5 +1,5 @@
 <template>
-  <div class="d-inline" :title="props.text" @copy="handleCopy">
+  <div class="d-inline" :title="props.text" :data-test-id="props.testId" @copy="handleCopy">
     <span aria-hidden="true">{{ truncatedText }}</span>
     <span class="d-none" tabindex="-1">{{ props.text }}</span>
   </div>
@@ -13,12 +13,14 @@ const props = withDefaults(
     text: string;
     maxLength?: number;
     overflowText?: string;
-    overflowPosition?: 'start' | 'middle' | 'end';
+    overflowPosition?: 'start' | 'middle' | 'end' | ((input: string) => string);
+    testId?: string;
   }>(),
   {
     maxLength: 18,
     overflowText: '...',
     overflowPosition: 'middle',
+    testId: undefined,
   },
 );
 
@@ -40,15 +42,19 @@ const truncatedText = computed(() => {
     }`;
   }
 
-  const overflowLengthStart = Math.ceil(props.overflowText.length / 2);
-  const overflowLengthEnd = Math.floor(props.overflowText.length / 2);
-  const start = Math.ceil((props.maxLength - 1) / 2) - overflowLengthStart;
-  const end = Math.floor((props.maxLength - 1) / 2) - overflowLengthEnd;
+  if (props.overflowPosition === 'middle') {
+    const overflowLengthStart = Math.ceil(props.overflowText.length / 2);
+    const overflowLengthEnd = Math.floor(props.overflowText.length / 2);
+    const start = Math.ceil((props.maxLength - 1) / 2) - overflowLengthStart;
+    const end = Math.floor((props.maxLength - 1) / 2) - overflowLengthEnd;
 
-  return `${props.text.slice(0, start)}${props.overflowText}${props.text.slice(
-    props.text.length - end,
-    props.text.length,
-  )}`;
+    return `${props.text.slice(0, start)}${props.overflowText}${props.text.slice(
+      props.text.length - end,
+      props.text.length,
+    )}`;
+  }
+
+  return props.overflowPosition(props.text);
 });
 
 const handleCopy = (event: ClipboardEvent): void => {

@@ -47,11 +47,18 @@
             name="argument"
             :readonly="readonly"
             :candid="
-              props.candidIdl ? { idl: props.candidIdl, method: model.methodName } : undefined
+              props.candidIdl
+                ? {
+                    idl: props.candidIdl,
+                    withType: model.methodName
+                      ? { kind: 'methodParams', name: model.methodName }
+                      : undefined,
+                  }
+                : undefined
             "
           />
         </VCol>
-        <VCol v-if="hasConfiguredValidationMethods" cols="12" class="px-0 px-6">
+        <VCol v-if="hasConfiguredValidationMethods" cols="12" class="pb-0 px-6">
           <VSelect
             v-model="model.validationTarget"
             :prepend-icon="mdiCodeBraces"
@@ -188,8 +195,8 @@ const { submit, edited, additionalFieldErrors, fieldsWithErrors, submitting, val
     model,
     submit: async (updatedModel: CanisterCallModel): Promise<void> => {
       try {
-        const methodName = assertAndReturn(updatedModel.methodName, 'Method name is required');
-        const canisterId = assertAndReturn(updatedModel.canisterId, 'Canister ID is required');
+        const methodName = assertAndReturn(updatedModel.methodName, 'Method name');
+        const canisterId = assertAndReturn(updatedModel.canisterId, 'Canister ID');
         const validationMethod =
           updatedModel.validationTarget &&
           variantIs(updatedModel.validationTarget, 'ValidationMethod')

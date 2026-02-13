@@ -130,7 +130,7 @@ impl RequestService {
             .then(|| {
                 self.evaluation_result_repository
                     .get(&request.id)
-                    .map(|evaluation| evaluation.to_owned())
+                    .map(|evaluation: crate::models::RequestEvaluationResult| evaluation.to_owned())
             })
             .flatten();
 
@@ -174,6 +174,15 @@ impl RequestService {
             vec![]
         };
 
+        let mut statuses: Vec<RequestStatusCode> = input
+            .statuses
+            .map(|statuses| statuses.into_iter().map(Into::into).collect::<_>())
+            .unwrap_or_default();
+
+        if input.only_approvable && !statuses.contains(&RequestStatusCode::Created) {
+            statuses.push(RequestStatusCode::Created);
+        }
+
         let mut request_ids = self.request_repository.find_ids_where(
             RequestWhereClause {
                 created_dt_from: input
@@ -197,15 +206,14 @@ impl RequestService {
                             .collect::<_>()
                     })
                     .unwrap_or_default(),
-                statuses: input
-                    .statuses
-                    .map(|statuses| statuses.into_iter().map(Into::into).collect::<_>())
-                    .unwrap_or_default(),
+                statuses,
                 requesters: filter_by_requesters.unwrap_or_default(),
                 approvers: filter_by_approvers.unwrap_or_default(),
                 not_approvers: filter_by_votable.clone(),
                 not_requesters: filter_by_votable,
                 excluded_ids: vec![],
+                deduplication_keys: input.deduplication_keys.unwrap_or_default(),
+                tags: input.tags.unwrap_or_default(),
             },
             input.sort_by,
         )?;
@@ -287,8 +295,10 @@ impl RequestService {
                 not_approvers: filter_by_votable.clone(),
                 not_requesters: filter_by_votable,
                 excluded_ids: exclude_request_ids,
+                deduplication_keys: vec![],
+                tags: vec![],
             },
-            None,
+            input.sort_by,
         )?;
 
         // filter out requests that the caller does not have access to read
@@ -310,7 +320,7 @@ impl RequestService {
 
     /// Creates a new request adding the caller user as the requester.
     ///
-    /// By default the request has an expiration date of 7 days from the creation date.
+    /// By default, the request has an expiration date of 7 days from the creation date.
     pub async fn create_request(
         &self,
         input: CreateRequestInput,
@@ -407,6 +417,37 @@ impl RequestService {
         }
     }
 
+    /// Cancels a request if the request is in the created status and the caller is the requester.
+    pub fn cancel_request(
+        &self,
+        request_id: &UUID,
+        reason: Option<String>,
+        ctx: &CallContext,
+    ) -> ServiceResult<Request> {
+        let caller = ctx.user().ok_or(RequestError::Unauthorized)?;
+        let request = self.get_request(request_id)?;
+
+        if request.status != RequestStatus::Created {
+            Err(RequestError::CancellationNotAllowed {
+                reason: "Only requests in the created status can be cancelled.".to_string(),
+            })?
+        }
+
+        if request.requested_by != caller.id {
+            Err(RequestError::CancellationNotAllowed {
+                reason: "Only the requester can cancel the request.".to_string(),
+            })?
+        }
+
+        let request = self.request_repository.cancel_request(
+            request,
+            reason.unwrap_or("Request cancelled by requester.".to_string()),
+            next_time(),
+        );
+
+        Ok(request)
+    }
+
     pub async fn submit_request_approval(
         &self,
         input: SubmitRequestApprovalInput,
@@ -428,7 +469,7 @@ impl RequestService {
         let maybe_evaluation = request.reevaluate().await?;
 
         self.request_repository
-            .insert(request.to_key(), request.to_owned());
+            .save_modified(&mut request, next_time());
 
         if let Some(evaluation) = maybe_evaluation {
             self.evaluation_result_repository
@@ -442,6 +483,14 @@ impl RequestService {
         Ok(request)
     }
 
+    pub fn complete_request(&self, mut request: Request, request_completed_time: u64) {
+        request.status = RequestStatus::Completed {
+            completed_at: request_completed_time,
+        };
+        self.request_repository
+            .save_modified(&mut request, request_completed_time);
+    }
+
     pub async fn fail_request(
         &self,
         mut request: Request,
@@ -451,9 +500,9 @@ impl RequestService {
         request.status = RequestStatus::Failed {
             reason: Some(reason),
         };
-        request.last_modification_timestamp = request_failed_time;
+
         self.request_repository
-            .insert(request.to_key(), request.to_owned());
+            .save_modified(&mut request, request_failed_time);
 
         self.failed_request_hook(&request).await;
     }
@@ -464,6 +513,18 @@ impl RequestService {
                 .map_err(|e| RequestExecuteError::InternalError {
                     reason: e.to_string(),
                 })?;
+
+        if let Err(err) = request.validate() {
+            match err {
+                RequestError::ValidationError { info } => {
+                    return Err(RequestExecuteError::ValidationError { info });
+                }
+                _ => {
+                    let reason = format!("Unexpected validation result: {:?}", err);
+                    return Err(RequestExecuteError::InternalError { reason });
+                }
+            }
+        }
 
         if !matches!(request.status, RequestStatus::Processing { .. }) {
             let reason = format!(
@@ -495,10 +556,8 @@ impl RequestService {
             RequestExecuteStage::Processing(operation) => operation,
         };
 
-        request.last_modification_timestamp = request_execution_time;
-
         self.request_repository
-            .insert(request.to_key(), request.to_owned());
+            .save_modified(&mut request, request_execution_time);
 
         Ok(())
     }
@@ -511,6 +570,7 @@ mod tests {
         core::test_utils,
         models::{
             account_test_utils::mock_account,
+            asset_test_utils::mock_asset,
             permission::Allow,
             request_policy_rule::RequestPolicyRule,
             request_policy_test_utils::mock_request_policy,
@@ -519,19 +579,19 @@ mod tests {
             resource::ResourceIds,
             user_test_utils::mock_user,
             AddAccountOperationInput, AddAddressBookEntryOperation,
-            AddAddressBookEntryOperationInput, AddUserOperation, AddUserOperationInput, Blockchain,
-            BlockchainStandard, Metadata, Percentage, RequestApproval, RequestOperation,
-            RequestPolicy, RequestStatus, TransferOperation, TransferOperationInput, User,
-            UserGroup, UserStatus, ADMIN_GROUP_ID,
+            AddAddressBookEntryOperationInput, AddAssetOperationInput, AddUserOperation,
+            AddUserOperationInput, AddressFormat, Asset, Blockchain, Metadata, Percentage,
+            RequestApproval, RequestOperation, RequestPolicy, RequestStatus, TokenStandard,
+            TransferOperation, TransferOperationInput, User, UserGroup, UserStatus, ADMIN_GROUP_ID,
         },
         repositories::{
-            request_policy::REQUEST_POLICY_REPOSITORY, AccountRepository, NOTIFICATION_REPOSITORY,
-            USER_GROUP_REPOSITORY, USER_REPOSITORY,
+            request_policy::REQUEST_POLICY_REPOSITORY, AccountRepository, AssetRepository,
+            NOTIFICATION_REPOSITORY, USER_GROUP_REPOSITORY, USER_REPOSITORY,
         },
-        services::AccountService,
+        services::{AccountService, ASSET_SERVICE},
     };
     use candid::Principal;
-    use orbit_essentials::model::ModelKey;
+    use orbit_essentials::{api::ApiError, model::ModelKey};
     use station_api::{
         ListRequestsOperationTypeDTO, RequestApprovalStatusDTO, RequestStatusCodeDTO,
     };
@@ -539,6 +599,7 @@ mod tests {
     struct TestContext {
         repository: RequestRepository,
         account_repository: AccountRepository,
+        asset_repository: AssetRepository,
         service: RequestService,
         caller_user: User,
         call_context: CallContext,
@@ -569,6 +630,7 @@ mod tests {
         TestContext {
             repository: RequestRepository::default(),
             account_repository: AccountRepository::default(),
+            asset_repository: AssetRepository::default(),
             service: RequestService::default(),
             account_service: AccountService::default(),
             caller_user: user,
@@ -589,12 +651,15 @@ mod tests {
             fee: None,
             input: TransferOperationInput {
                 from_account_id: *account_id.as_bytes(),
+                from_asset_id: [1; 16],
+                with_standard: TokenStandard::InternetComputerNative,
                 amount: candid::Nat(100u32.into()),
                 fee: None,
                 metadata: Metadata::default(),
                 network: "mainnet".to_string(),
                 to: "0x1234".to_string(),
             },
+            asset: mock_asset(),
         });
 
         ctx.account_repository
@@ -620,12 +685,15 @@ mod tests {
             fee: None,
             input: TransferOperationInput {
                 from_account_id: *account_id.as_bytes(),
+                from_asset_id: [1; 16],
+                with_standard: TokenStandard::InternetComputerNative,
                 amount: candid::Nat(100u32.into()),
                 fee: None,
                 metadata: Metadata::default(),
                 network: "mainnet".to_string(),
                 to: "0x1234".to_string(),
             },
+            asset: mock_asset(),
         });
         request.approvals = vec![];
         let mut request_policy = mock_request_policy();
@@ -679,6 +747,13 @@ mod tests {
         USER_REPOSITORY.insert(unrelated_user.to_key(), unrelated_user.clone());
 
         // creates the account for the transfer
+        let asset = Asset {
+            id: [1; 16],
+            ..mock_asset()
+        };
+
+        ctx.asset_repository.insert(asset.key(), asset.clone());
+
         let account = mock_account();
 
         ctx.account_repository
@@ -702,6 +777,8 @@ mod tests {
                             from_account_id: Uuid::from_bytes(account.id.to_owned())
                                 .hyphenated()
                                 .to_string(),
+                            from_asset_id: Uuid::from_bytes([1; 16]).hyphenated().to_string(),
+                            with_standard: TokenStandard::InternetComputerNative.to_string(),
                             amount: candid::Nat(100u32.into()),
                             fee: None,
                             metadata: vec![],
@@ -712,6 +789,9 @@ mod tests {
                     title: None,
                     summary: None,
                     execution_plan: None,
+                    expiration_dt: None,
+                    deduplication_key: None,
+                    tags: None,
                 },
                 &ctx.call_context,
             )
@@ -749,11 +829,15 @@ mod tests {
                             blockchain: "icp".to_owned(),
                             metadata: vec![],
                             labels: vec![],
+                            address_format: AddressFormat::ICPAccountIdentifier.to_string(),
                         },
                     ),
                     title: None,
                     summary: None,
                     execution_plan: Some(station_api::RequestExecutionScheduleDTO::Immediate),
+                    expiration_dt: None,
+                    deduplication_key: None,
+                    tags: None,
                 },
                 &ctx.call_context,
             )
@@ -761,6 +845,120 @@ mod tests {
             .unwrap();
 
         assert!(!request.approvals.is_empty());
+    }
+
+    #[tokio::test]
+    async fn user_can_cancel_their_own_pending_request() {
+        let ctx = setup();
+
+        let mut request = mock_request();
+        request.requested_by = ctx.caller_user.id;
+        request.status = RequestStatus::Created;
+        request.operation = RequestOperation::Transfer(TransferOperation {
+            transfer_id: None,
+            fee: None,
+            asset: mock_asset(),
+            input: TransferOperationInput {
+                from_account_id: [9; 16],
+                from_asset_id: [1; 16],
+                with_standard: TokenStandard::InternetComputerNative,
+                amount: candid::Nat(100u32.into()),
+                fee: None,
+                metadata: Metadata::default(),
+                network: "mainnet".to_string(),
+                to: "0x1234".to_string(),
+            },
+        });
+
+        ctx.repository.insert(request.to_key(), request.to_owned());
+
+        let result =
+            ctx.service
+                .cancel_request(&request.id, Some("testing".to_string()), &ctx.call_context);
+
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap().status,
+            RequestStatus::Cancelled {
+                reason: Some("testing".to_string())
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn fail_to_cancel_another_user_request() {
+        let ctx = setup();
+
+        let mut request = mock_request();
+        request.requested_by = [93; 16];
+        request.status = RequestStatus::Created;
+        request.operation = RequestOperation::Transfer(TransferOperation {
+            transfer_id: None,
+            fee: None,
+            asset: mock_asset(),
+            input: TransferOperationInput {
+                from_account_id: [9; 16],
+                from_asset_id: [1; 16],
+                with_standard: TokenStandard::InternetComputerNative,
+                amount: candid::Nat(100u32.into()),
+                fee: None,
+                metadata: Metadata::default(),
+                network: "mainnet".to_string(),
+                to: "0x1234".to_string(),
+            },
+        });
+
+        ctx.repository.insert(request.to_key(), request.to_owned());
+
+        let result =
+            ctx.service
+                .cancel_request(&request.id, Some("testing".to_string()), &ctx.call_context);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            ApiError::from(RequestError::CancellationNotAllowed {
+                reason: "Only the requester can cancel the request.".to_string()
+            })
+        )
+    }
+
+    #[tokio::test]
+    async fn fail_cancel_request_not_in_created_status() {
+        let ctx = setup();
+
+        let mut request = mock_request();
+        request.requested_by = ctx.caller_user.id;
+        request.status = RequestStatus::Processing { started_at: 10 };
+        request.operation = RequestOperation::Transfer(TransferOperation {
+            transfer_id: None,
+            fee: None,
+            asset: mock_asset(),
+            input: TransferOperationInput {
+                from_account_id: [9; 16],
+                from_asset_id: [1; 16],
+                with_standard: TokenStandard::InternetComputerNative,
+                amount: candid::Nat(100u32.into()),
+                fee: None,
+                metadata: Metadata::default(),
+                network: "mainnet".to_string(),
+                to: "0x1234".to_string(),
+            },
+        });
+
+        ctx.repository.insert(request.to_key(), request.to_owned());
+
+        let result =
+            ctx.service
+                .cancel_request(&request.id, Some("testing".to_string()), &ctx.call_context);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            ApiError::from(RequestError::CancellationNotAllowed {
+                reason: "Only requests in the created status can be cancelled.".to_string()
+            })
+        )
     }
 
     #[tokio::test]
@@ -794,6 +992,7 @@ mod tests {
                 blockchain: Blockchain::InternetComputer,
                 metadata: vec![],
                 labels: vec![],
+                address_format: AddressFormat::ICPAccountIdentifier,
             },
         });
         request.approvals = vec![
@@ -831,6 +1030,8 @@ mod tests {
             paginate: None,
             sort_by: None,
             statuses: None,
+            deduplication_keys: None,
+            tags: None,
         };
 
         let users = vec![requester, approver, another_user];
@@ -861,12 +1062,15 @@ mod tests {
             fee: None,
             input: TransferOperationInput {
                 from_account_id: [9; 16],
+                from_asset_id: [1; 16],
+                with_standard: TokenStandard::InternetComputerNative,
                 amount: candid::Nat(100u32.into()),
                 fee: None,
                 metadata: Metadata::default(),
                 network: "mainnet".to_string(),
                 to: "0x1234".to_string(),
             },
+            asset: mock_asset(),
         });
         request.created_timestamp = 10;
         request.approvals = vec![];
@@ -898,6 +1102,8 @@ mod tests {
                     sort_by: None,
                     only_approvable: false,
                     with_evaluation_results: false,
+                    deduplication_keys: None,
+                    tags: None,
                 },
                 &ctx.call_context,
             )
@@ -922,6 +1128,20 @@ mod tests {
         no_access_user.identities = vec![Principal::from_slice(&[2; 29])];
         USER_REPOSITORY.insert(no_access_user.to_key(), no_access_user.clone());
 
+        let asset = ASSET_SERVICE
+            .create(
+                AddAssetOperationInput {
+                    name: "foo".to_string(),
+                    symbol: "FOO".to_string(),
+                    decimals: 18,
+                    metadata: Metadata::default(),
+                    blockchain: Blockchain::InternetComputer,
+                    standards: vec![TokenStandard::InternetComputerNative],
+                },
+                None,
+            )
+            .expect("Failed to create asset");
+
         // create account
         let account_owners = vec![ctx.caller_user.id, transfer_requester_user.id];
         let account = ctx
@@ -929,8 +1149,7 @@ mod tests {
             .create_account(
                 AddAccountOperationInput {
                     name: "foo".to_string(),
-                    blockchain: Blockchain::InternetComputer,
-                    standard: BlockchainStandard::Native,
+                    assets: vec![asset.id],
                     metadata: Metadata::default(),
                     transfer_request_policy: Some(RequestPolicyRule::QuorumPercentage(
                         UserSpecifier::Id(vec![ctx.caller_user.id, transfer_requester_user.id]),
@@ -978,12 +1197,15 @@ mod tests {
                     fee: None,
                     input: TransferOperationInput {
                         from_account_id: account.id,
+                        from_asset_id: asset.id,
+                        with_standard: TokenStandard::InternetComputerNative,
                         amount: candid::Nat(100u32.into()),
                         fee: None,
                         metadata: Metadata::default(),
                         network: "mainnet".to_string(),
                         to: "0x1234".to_string(),
                     },
+                    asset: mock_asset(),
                 });
                 transfer.created_timestamp = 10 + i as u64;
                 transfer.approvals = vec![RequestApproval {
@@ -1017,6 +1239,8 @@ mod tests {
                     sort_by: None,
                     only_approvable: true,
                     with_evaluation_results: false,
+                    deduplication_keys: None,
+                    tags: None,
                 },
                 &ctx.call_context,
             )
@@ -1042,6 +1266,8 @@ mod tests {
                     sort_by: None,
                     only_approvable: true,
                     with_evaluation_results: false,
+                    deduplication_keys: None,
+                    tags: None,
                 },
                 &CallContext::new(transfer_requester_user.identities[0]),
             )
@@ -1066,6 +1292,8 @@ mod tests {
                     sort_by: None,
                     only_approvable: true,
                     with_evaluation_results: false,
+                    deduplication_keys: None,
+                    tags: None,
                 },
                 &CallContext::new(no_access_user.identities[0]),
             )
@@ -1107,6 +1335,8 @@ mod tests {
                     )),
                     only_approvable: true,
                     with_evaluation_results: false,
+                    deduplication_keys: None,
+                    tags: None,
                 },
                 &ctx.call_context,
             )
@@ -1116,6 +1346,289 @@ mod tests {
         assert_eq!(votable_requests.items.len(), TRANSFER_COUNT - 1);
         assert_eq!(votable_requests.items[0].id, transfer_requests[0].id);
         assert_eq!(votable_requests.items[1].id, transfer_requests[2].id);
+    }
+
+    #[tokio::test]
+    async fn get_next_approvable_request_returns_requests_sorted() {
+        let ctx = setup();
+
+        let user_2 = mock_user();
+        USER_REPOSITORY.insert(user_2.to_key(), user_2.clone());
+
+        REQUEST_POLICY_REPOSITORY.insert(
+            [0; 16],
+            RequestPolicy {
+                id: [0; 16],
+                specifier: RequestSpecifier::Transfer(ResourceIds::Any),
+                rule: RequestPolicyRule::QuorumPercentage(
+                    UserSpecifier::Id(vec![ctx.caller_user.id, user_2.id]),
+                    Percentage(100),
+                ),
+            },
+        );
+
+        let mut request = mock_request();
+        request.status = RequestStatus::Created;
+        request.approvals = vec![RequestApproval {
+            approver_id: ctx.caller_user.id,
+            status: RequestApprovalStatus::Approved,
+            decided_dt: 0,
+            last_modification_timestamp: 0,
+            status_reason: None,
+        }];
+
+        // Add 3 requests with different ids and created_timestamps.
+        // The requests in the BTreeMap are stored ordered by their id.
+        // Without a sort_by, the request with the lowest id should be returned first,
+        // which will be in reverse order of creation.
+        for (id, ts) in [(1u8, 3u64), (4, 2), (3, 1), (2, 4)] {
+            request.id = [id; 16]; // storage order is different from timestamp order
+            request.created_timestamp = ts;
+            REQUEST_REPOSITORY.insert(request.to_key(), request.clone());
+        }
+
+        let next_approvable_request = ctx
+            .service
+            .get_next_approvable_request(
+                GetNextApprovableRequestInput {
+                    excluded_request_ids: vec![],
+                    operation_types: None,
+                    sort_by: None,
+                },
+                Some(&CallContext::new(user_2.identities[0])),
+            )
+            .await
+            .expect("Failed to get next approvable request")
+            .expect("No next approvable request");
+
+        // without sort_by, the request with the highest timestamp should be returned
+        assert_eq!(next_approvable_request.created_timestamp, 4);
+
+        let next_approvable_request = ctx
+            .service
+            .get_next_approvable_request(
+                GetNextApprovableRequestInput {
+                    excluded_request_ids: vec![],
+                    operation_types: None,
+                    sort_by: Some(station_api::ListRequestsSortBy::CreatedAt(
+                        station_api::SortDirection::Asc,
+                    )),
+                },
+                Some(&CallContext::new(user_2.identities[0])),
+            )
+            .await
+            .expect("Failed to get next approvable request")
+            .expect("No next approvable request");
+
+        // with sort_by, the request with the lowest created_timestamp should be returned
+        assert_eq!(next_approvable_request.created_timestamp, 1);
+    }
+
+    #[tokio::test]
+    async fn list_approvable_only_lists_pending() {
+        let ctx = setup();
+
+        let user_2 = mock_user();
+        USER_REPOSITORY.insert(user_2.to_key(), user_2.clone());
+
+        REQUEST_POLICY_REPOSITORY.insert(
+            [0; 16],
+            RequestPolicy {
+                id: [0; 16],
+                specifier: RequestSpecifier::Transfer(ResourceIds::Any),
+                rule: RequestPolicyRule::QuorumPercentage(
+                    UserSpecifier::Id(vec![ctx.caller_user.id, user_2.id]),
+                    Percentage(100),
+                ),
+            },
+        );
+
+        let approval = RequestApproval {
+            approver_id: ctx.caller_user.id,
+            status: RequestApprovalStatus::Approved,
+            decided_dt: 0,
+            last_modification_timestamp: 0,
+            status_reason: None,
+        };
+
+        let mut non_approvable_request = mock_request();
+        non_approvable_request.status = RequestStatus::Completed { completed_at: 0 };
+        non_approvable_request.approvals = vec![approval.clone()];
+        ctx.repository.insert(
+            non_approvable_request.to_key(),
+            non_approvable_request.clone(),
+        );
+
+        let mut approvable_request = mock_request();
+        approvable_request.status = RequestStatus::Created;
+        approvable_request.approvals = vec![approval.clone()];
+        ctx.repository
+            .insert(approvable_request.to_key(), approvable_request.clone());
+
+        let approvable_requests = ctx
+            .service
+            .list_requests(
+                ListRequestsInput {
+                    requester_ids: None,
+                    approver_ids: None,
+                    statuses: None,
+                    operation_types: None,
+                    expiration_from_dt: None,
+                    expiration_to_dt: None,
+                    created_from_dt: None,
+                    created_to_dt: None,
+                    paginate: None,
+                    sort_by: None,
+                    only_approvable: true,
+                    with_evaluation_results: false,
+                    deduplication_keys: None,
+                    tags: None,
+                },
+                &CallContext::new(user_2.identities[0]),
+            )
+            .await
+            .expect("Failed to list approvable requests");
+
+        assert_eq!(approvable_requests.items.len(), 1);
+        assert_eq!(approvable_requests.items[0].id, approvable_request.id);
+    }
+
+    #[tokio::test]
+    async fn adding_approval_updates_last_modification_timestamp() {
+        let TestContext { call_context, .. } = setup();
+
+        let user_2 = mock_user();
+        USER_REPOSITORY.insert(user_2.to_key(), user_2.clone());
+
+        let user_3 = mock_user();
+        USER_REPOSITORY.insert(user_3.to_key(), user_3.clone());
+
+        let policy = RequestPolicy {
+            id: [0; 16],
+            specifier: RequestSpecifier::AddAddressBookEntry,
+            rule: RequestPolicyRule::QuorumPercentage(UserSpecifier::Any, Percentage(100)),
+        };
+        REQUEST_POLICY_REPOSITORY.insert(policy.key(), policy);
+
+        let input = station_api::CreateRequestInput {
+            execution_plan: None,
+            expiration_dt: None,
+            operation: station_api::RequestOperationInput::AddAddressBookEntry(
+                station_api::AddAddressBookEntryOperationInput {
+                    address_owner: "test".to_string(),
+                    address: "0x1234".to_string(),
+                    address_format: "icp_account_identifier".to_string(),
+                    blockchain: "icp".to_string(),
+                    metadata: vec![],
+                    labels: vec![],
+                },
+            ),
+            summary: None,
+            title: None,
+            deduplication_key: None,
+            tags: None,
+        };
+
+        let request_before_approval = REQUEST_SERVICE
+            .create_request(input, &call_context)
+            .await
+            .expect("Failed to create request");
+
+        let request_after_approval = REQUEST_SERVICE
+            .submit_request_approval(
+                station_api::SubmitRequestApprovalInput {
+                    decision: RequestApprovalStatusDTO::Approved,
+                    reason: None,
+                    request_id: Uuid::from_bytes(request_before_approval.id)
+                        .hyphenated()
+                        .to_string(),
+                },
+                &CallContext::new(user_2.identities[0]),
+            )
+            .await
+            .expect("Failed to submit request approval");
+
+        // assert that the last modification timestamp was updated
+        assert!(
+            request_after_approval.last_modification_timestamp
+                > request_before_approval.last_modification_timestamp
+        );
+
+        // assert that the request is still pending and the timestamp modification happened
+        // only because of the approval
+        assert!(request_after_approval.status == RequestStatus::Created);
+    }
+
+    #[tokio::test]
+    async fn list_by_deduplication_key_returns_correct_requests() {
+        let ctx = setup();
+        let user_2 = mock_user();
+        USER_REPOSITORY.insert(user_2.to_key(), user_2.clone());
+        REQUEST_POLICY_REPOSITORY.insert(
+            [0; 16],
+            RequestPolicy {
+                id: [0; 16],
+                specifier: RequestSpecifier::Transfer(ResourceIds::Any),
+                rule: RequestPolicyRule::QuorumPercentage(
+                    UserSpecifier::Id(vec![ctx.caller_user.id, user_2.id]),
+                    Percentage(100),
+                ),
+            },
+        );
+
+        let deduplication_keys = vec![
+            None,
+            Some("1".to_string()),
+            Some("1".to_string()),
+            Some("2".to_string()),
+            Some("3".to_string()),
+        ];
+
+        for deduplication_key in deduplication_keys {
+            let mut request = mock_request();
+            request.deduplication_key = deduplication_key;
+            REQUEST_REPOSITORY.insert(request.to_key(), request.clone());
+        }
+
+        let requests = ctx
+            .service
+            .list_requests(
+                ListRequestsInput {
+                    deduplication_keys: Some(vec!["1".to_string(), "2".to_string()]),
+                    requester_ids: None,
+                    approver_ids: None,
+                    statuses: None,
+                    operation_types: None,
+                    expiration_from_dt: None,
+                    expiration_to_dt: None,
+                    created_from_dt: None,
+                    created_to_dt: None,
+                    paginate: None,
+                    sort_by: None,
+                    only_approvable: false,
+                    with_evaluation_results: false,
+                    tags: None,
+                },
+                &CallContext::new(user_2.identities[0]),
+            )
+            .await
+            .expect("Failed to list requests");
+
+        assert_eq!(requests.items.len(), 3);
+
+        // go over the results and make sure there are 2 with deduplication key 1 and 1 with deduplication key 2
+        let mut deduplication_key_1_count = 0;
+        let mut deduplication_key_2_count = 0;
+        for request in requests.items {
+            if request.deduplication_key == Some("1".to_string()) {
+                deduplication_key_1_count += 1;
+            } else if request.deduplication_key == Some("2".to_string()) {
+                deduplication_key_2_count += 1;
+            }
+        }
+
+        assert_eq!(deduplication_key_1_count, 2);
+        assert_eq!(deduplication_key_2_count, 1);
     }
 }
 
@@ -1203,6 +1716,8 @@ mod benchs {
                             )),
                             only_approvable: false,
                             with_evaluation_results: false,
+                            deduplication_keys: None,
+                            tags: None,
                         },
                         &CallContext::new(Principal::from_slice(&[5; 29])),
                     )
@@ -1248,6 +1763,8 @@ mod benchs {
                             )),
                             only_approvable: false,
                             with_evaluation_results: false,
+                            deduplication_keys: None,
+                            tags: None,
                         },
                         &CallContext::new(Principal::from_slice(&[5; 29])),
                     )

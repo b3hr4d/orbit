@@ -11,6 +11,8 @@ export enum ListRequestsOperationTypeGroup {
   SystemUpgrade = 'system_upgrade',
   SystemInfo = 'system_info',
   ExternalCanister = 'external_canister',
+  Asset = 'asset',
+  NamedRule = 'named_rule',
 }
 
 export enum RequestApprovalStatusEnum {

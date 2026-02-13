@@ -1,4 +1,7 @@
-use crate::errors::{ExternalCanisterValidationError, RecordValidationError, ValidationError};
+use crate::errors::{
+    ExternalCanisterValidationError, RecordValidationError, SystemInfoValidationError,
+    ValidationError,
+};
 use orbit_essentials::api::DetailableError;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -35,6 +38,9 @@ pub enum RequestError {
     /// Request policy not found for id `{id}`.
     #[error(r#"Request policy not found for id `{id}`"#)]
     PolicyNotFound { id: String },
+    /// Request cancellation not allowed.
+    #[error(r#"Request cancellation not allowed."#)]
+    CancellationNotAllowed { reason: String },
 }
 
 impl DetailableError for RequestError {
@@ -69,6 +75,10 @@ impl DetailableError for RequestError {
                 details.insert("id".to_string(), id.to_string());
                 Some(details)
             }
+            RequestError::CancellationNotAllowed { reason } => {
+                details.insert("reason".to_string(), reason.to_string());
+                Some(details)
+            }
             _ => None,
         }
     }
@@ -99,11 +109,20 @@ impl From<ExternalCanisterValidationError> for RequestError {
     }
 }
 
+impl From<SystemInfoValidationError> for RequestError {
+    fn from(err: SystemInfoValidationError) -> RequestError {
+        RequestError::ValidationError {
+            info: err.to_string(),
+        }
+    }
+}
+
 impl From<ValidationError> for RequestError {
     fn from(err: ValidationError) -> RequestError {
         match err {
             ValidationError::RecordValidationError(err) => err.into(),
             ValidationError::ExternalCanisterValidationError(err) => err.into(),
+            ValidationError::SystemInfoValidationError(err) => err.into(),
         }
     }
 }

@@ -1,7 +1,7 @@
 export default {
   app: {
-    title: '{app} Wallet',
-    name: 'Orbit Wallet',
+    title: '{app}',
+    name: 'Orbit',
     action_save_failed: 'Failed to save action, please try again.',
     action_save_success: 'Action successfully saved.',
     session_load_error: 'Failed to load your session, please try again.',
@@ -21,6 +21,7 @@ export default {
     station_info_card_remove_btn: 'Remove wallet',
     station_info_card_remove_btn_confirm: 'Are you sure you want to remove this wallet?',
     disaster_recovery_card_title: 'Disaster Recovery',
+    disaster_recovery: 'Disaster Recovery',
     disaster_recovery_not_configured: 'Disaster recovery not configured.',
     disaster_recovery_dialog_title: 'Configure Disaster Recovery',
     manage_associated_station: 'Manage associated wallet',
@@ -52,6 +53,7 @@ export default {
     search_users: 'Search users',
     search_user_groups: 'Search user groups',
     search_accounts: 'Search accounts',
+    search_addresses: 'Search addresses...',
     destination_source: 'Destination / Source',
     amount_token: 'Amount, {token}',
     no_transfers: 'No transfer found.',
@@ -95,22 +97,25 @@ export default {
       verify_instructions:
         'To verify the update, open the terminal and follow the instructions bellow:',
     },
+    asset: 'Asset',
     no_data: 'No data available.',
     no_matching_results: 'No matching results found for `{search}`.',
     add_new_label: 'Add new label: {label}',
     user_cancel_pending_requests: 'Cancel all pending requests from this user.',
     error_dialog_title: 'Failed to load.',
     error_dialog_message: 'Failed to load, please try again.',
-  },
-  alpha_warning: {
-    version: 'This is an alpha version.',
-    caution: 'Use with caution.',
+    request_submit_failed: 'Request failed to submit, please try again.',
   },
   blockchains: {
     icp: {
       name: 'Internet Computer',
       standards: {
-        native: 'Native',
+        icp_native: 'ICP (Native)',
+        icrc1: 'ICRC-1',
+      },
+      formats: {
+        icp_account_identifier: 'ICP Native',
+        icrc1_account: 'ICRC-1',
       },
     },
     eth: {
@@ -140,6 +145,8 @@ export default {
     no_results_found: 'No requests found.',
     no_more_requests_to_approve: 'No more requests to approve.',
     load_next: 'Load next',
+    failed_to_fetch_details:
+      'Failed to fetch existing entry. Details of requested changes cannot be displayed.',
     status: {
       created: 'Pending',
       cancelled: 'Cancelled',
@@ -162,6 +169,7 @@ export default {
     processing_scheduled_at: 'Processing scheduled at {dt}',
     no_cancelled_reason: 'No reason specified.',
     no_failed_reason: 'No reason specified.',
+    request_url_copied_to_clipboard: 'Request URL copied to clipboard.',
     domains: {
       all: 'All',
       accounts: 'Accounts',
@@ -169,6 +177,7 @@ export default {
       system: 'System',
       transfers: 'Transfers',
       users: 'Users',
+      assets: 'Assets',
       external_canisters: 'Canisters',
     },
     headers: {
@@ -200,6 +209,10 @@ export default {
       amount: 'Amount',
       fee: 'Fee',
       comment: 'Comment',
+      url: 'URL',
+      rule_id: 'Rule ID',
+      rule_name: 'Rule Name',
+      rule_description: 'Rule Description',
     },
     download: {
       user_group: 'User Groups',
@@ -212,6 +225,8 @@ export default {
       transfer: 'Transfers',
       external_canister: 'External Canisters',
       system_info: 'System Info',
+      asset: 'Assets',
+      named_rule: 'Approval Rules',
     },
     types: {
       addusergroup: {
@@ -265,6 +280,9 @@ export default {
       editaccount: {
         title: 'Edit account',
         request_title: 'Edit account request',
+        added_assets: 'Added',
+        removed_assets: 'Removed',
+        replaced_assets: 'Replaced',
       },
       editaddressbookentry: {
         title: 'Edit address book entry',
@@ -281,6 +299,18 @@ export default {
       managesysteminfo: {
         title: 'Manage system info',
         request_title: 'Manage system info request',
+      },
+      addasset: {
+        title: 'Add asset',
+        request_title: 'Add asset request',
+      },
+      editasset: {
+        title: 'Edit asset',
+        request_title: 'Edit asset request',
+      },
+      removeasset: {
+        title: 'Remove asset',
+        request_title: 'Remove asset request',
       },
       createexternalcanister: {
         title: 'Create canister',
@@ -305,6 +335,18 @@ export default {
       setdisasterrecovery: {
         title: 'Edit disaster recovery',
         request_title: 'Edit disaster recovery request',
+      },
+      addnamedrule: {
+        title: 'Add approval rule',
+        request_title: 'Add approval rule request',
+      },
+      editnamedrule: {
+        title: 'Edit approval rule',
+        request_title: 'Edit approval rule request',
+      },
+      removenamedrule: {
+        title: 'Remove approval rule',
+        request_title: 'Remove approval rule request',
       },
       unknown: {
         title: 'Unknown',
@@ -357,17 +399,22 @@ export default {
   },
   sidebar: {
     highlights: {
-      main: 'Trustless Wallet {line1} {line2} {line3}',
-      line3: 'Multichain',
-      line1: 'Digital Assets',
-      line2: 'Multi-Custody',
+      main: 'Secure Wallet {line1} {line2} {line3}',
+      line1: 'Multi Approval',
+      line2: 'Digital Assets',
+      line3: 'Smart Contracts',
     },
   },
   landing: {
-    title: 'Seamless Multichain',
-    subtitle: 'One Platform, Full Control',
-    description:
-      'Orbit streamlines on-chain asset management for enterprises, DAOs, and teams, consolidating control and visibility into a single, intuitive platform.',
+    btn_accept_license: {
+      phrase: 'By clicking this button, you agree to the {0}.',
+      license: 'License',
+    },
+    highlights: {
+      multiapproval: 'Multi approval policies',
+      treasury: 'Treasury management',
+      smartcontract: 'Smart contract management',
+    },
     connect_title: 'Securely connect to manage your digital assets',
     connect_btn: 'Connect with Internet Identity',
     connect_error: 'Failed to connect, please try again.',
@@ -430,7 +477,17 @@ export default {
       tc: 'TC',
       bc: 'Billion',
       mc: 'Million',
-      e8s: 'e8s',
+      cycles: 'Cycles',
+    },
+  },
+  time: {
+    units: {
+      y: 'Years',
+      m: 'Months',
+      d: 'Days',
+      h: 'Hours',
+      min: 'Minutes',
+      sec: 'Seconds',
     },
   },
   external_canisters: {
@@ -450,11 +507,66 @@ export default {
     not_found_description: 'The canister you are looking for does not exist.',
     ic_settings: 'IC Settings',
     top_up: 'Top Up',
+    start_monitoring: 'Start Monitoring',
+    monitor: {
+      title: 'Monitor cycles',
+      start_title: 'Monitor',
+      stop_title: 'Stop Monitoring',
+      funding_strategy_label: 'Funding strategy',
+      cycle_obtain_strategy_label: 'Cycle minting strategy',
+      funding_info_text: 'Selected strategy is evaluated every 6 hours.',
+      strategy: {
+        label: 'Monitoring strategy',
+        BelowEstimatedRuntime: 'Below estimated runtime',
+        BelowThreshold: 'Below threshold',
+        Always: 'Always',
+        fund_runtime_secs: 'Runtime to fund',
+        min_runtime_secs: 'Runtime threshold',
+        max_runtime_cycles_fund: 'Maximum cycles to fund',
+        fallback_min_cycles: 'Fallback cycles threshold',
+        fallback_fund_cycles: 'Fallback cycles to fund',
+        min_cycles: 'Cycles threshold',
+        fund_cycles: 'Cycles to fund',
+        fund_runtime_secs_hint: 'Specify the duration for which the canister should be funded.',
+        min_runtime_secs_hint: 'Specify the minimum runtime threshold to trigger funding.',
+        max_runtime_cycles_fund_hint:
+          'Specify the maximum number of cycles that can be funded at once.',
+        fallback_min_cycles_hint:
+          'Specify the minimum cycles threshold for fallback funding when runtime cannot be computed.',
+        fallback_fund_cycles_hint:
+          'Specify the cycles to fund for fallback funding when runtime cannot be computed.',
+        min_cycles_hint: 'Specify the cycles threshold to trigger funding.',
+        fund_cycles_hint: 'Specify the cycles to fund.',
+      },
+    },
+    obtain: {
+      title: 'Obtain cycles',
+      strategy: {
+        label: 'Obtain strategy',
+        StationDefault: 'Station default',
+        MintFromNativeToken: 'Mint from native token',
+        WithdrawFromCyclesLedger: 'Withdraw from Cycles Ledger',
+      },
+    },
     configuration: 'Configuration',
     unlink: 'Unlink',
     unlink_title: 'Unlink Canister',
     unlink_soft_delete: 'Keep the canister on the Internet Computer, only remove its reference.',
     performed_calls: 'Performed calls',
+    snapshots: {
+      title: 'Snapshots',
+      no_snapshots: 'There are no snapshots created for this canister.',
+      create_snapshot: 'Create snapshot',
+      create_snapshot_description:
+        'Snapshots ensure your information is safely stored and can be restored in case of data loss or corruption. They also allow you to iterate safely, knowing that your previous data is securely preserved.',
+      id: 'ID',
+      size_mb: 'Size (mb)',
+      created_at: 'Created at',
+      remove_snapshot_title: 'Snapshot removal',
+      restore_snapshot_title: 'Snapshot restoration',
+      restore_snapshot_confirmation: 'Are you sure you want to restore this snapshot?',
+      remove_snapshot_confirmation: 'Are you sure you want to remove this snapshot?',
+    },
     perform_call: {
       title: 'Perform Call',
       reply_received: 'Reply received',
@@ -511,7 +623,9 @@ export default {
     install: 'Install',
     send_cycles: 'Send Cycles',
     top_up_hint: 'Amount of cycles to add to the target canister.',
+    monitor_hint: 'Configuration for automated monitoring of cycles.',
     add_controller: 'Add controller',
+    add_principal: 'Add principal',
     no_controllers: 'No controllers',
     self_controller: 'Self controlled',
     non_orbit_controllers_warning:
@@ -551,8 +665,13 @@ export default {
     },
   },
   terms: {
+    license: 'License',
+    loading: 'Loading',
+    permission: 'Permission',
     controllers: 'Controllers',
+    restore: 'Restore',
     public: 'Public',
+    allowed_viewers: 'Allowed viewers',
     execute: 'Execute',
     error: 'Error',
     self: 'Self',
@@ -596,6 +715,7 @@ export default {
     target: 'Target',
     download: 'Download',
     upgrader: 'Upgrader',
+    upgrader_id: 'Upgrader ID',
     view: 'View',
     new_address: 'New Address',
     request: 'Request',
@@ -619,6 +739,7 @@ export default {
     see_all: 'See All',
     requests: 'Requests',
     cancel: 'Cancel',
+    cancel_request: 'Cancel Request',
     checksum: 'Checksum',
     module_checksum: 'Module Checksum',
     rejected: 'Rejected',
@@ -696,6 +817,7 @@ export default {
     principal: 'Principal',
     status: 'Status',
     transfer: 'Transfer',
+    transfer_asset: 'Transfer {asset}',
     invalid: 'Invalid',
     control_panel: 'Control panel',
     confirmed: 'Confirmed',
@@ -710,6 +832,9 @@ export default {
     version: 'Version',
     continue: 'Continue',
     cycle_obtain_strategy: 'Wallet top-up method',
+    symbol: 'Symbol',
+    standards: 'Standards',
+    assets: 'Assets',
   },
   forms: {
     create: 'Create',
@@ -732,11 +857,15 @@ export default {
       numberRange: 'This field must be between {min} and {max}.',
       invalidDecimalPlaces: 'This field must have a maximum of {decimals} decimal places.',
       isHex: 'This field must be a valid hexadecimal value.',
+      validAddress: 'This field must be a valid address.',
+      validSymbol: 'Symbol must be 1-32 alphanumeric characters.',
     },
   },
   navigation: {
     home: 'Home',
+    dashboard: 'Dashboard',
     accounts: 'Accounts',
+    account: 'Account',
     address_book: 'Address Book',
     users: 'Users',
     settings: 'Settings',
@@ -750,9 +879,15 @@ export default {
     transfer_requests: 'Transfer Requests',
     permissions: 'Permissions',
     request_policies: 'Request Policies',
+    assets: 'Assets',
     external_canisters: 'Canisters',
+    approval_rules: 'Approval Rules',
   },
   pages: {
+    dashboard: {
+      title: 'Dashboard',
+      available_assets: 'Available Assets',
+    },
     accounts: {
       title: 'Accounts',
       btn_new_transfer: 'New transfer',
@@ -773,12 +908,21 @@ export default {
       csv_ignored_transfers_hint: 'Transfers with errors will be ignored.',
       csv_transfer_failed: 'Failed to process transfers, please try again.',
       csv_download_invalid: 'Download invalid',
+      add_asset: 'Add asset',
+      remove_asset: 'Remove asset',
+      no_assets_to_add: 'No assets available to add.',
+      remove_asset_confirm:
+        'Are you sure you want to remove this asset? Removing the asset does not affect the account balance. Re-adding the asset will restore access to the balance.',
+      transfers_not_supported: 'Transfers are not supported for this asset.',
+      add_index_canister_to_see_transactions:
+        'Consider adding the index canister to the asset to see transactions.',
     },
     address_book: {
       title: 'Address Book',
       btn_new_entry: 'New entry',
       no_results_found: 'No address book entry found.',
       error_fetching_address_book: 'Error fetching address book, please try again.',
+      table_title: 'Addresses',
     },
     user_settings: {
       title: 'Account Info & Settings',
@@ -786,9 +930,12 @@ export default {
     },
     administration: {
       title: 'Administration',
+      system_info_error: 'Error loading station system info, please try again.',
       cycle_obtain_strategy_disabled:
         'WARNING: Station cycle balance top-up disabled. Your station may run out of cycles.',
       cycle_obtain_strategy_mint_from_native_token: 'Mint from ICP account',
+      cycle_obtain_strategy_withdraw_from_cycles_ledger: 'Withdraw from Cycles Ledger account',
+      cycle_balances: 'Cycle Balances',
     },
     users: {
       title: 'Users',
@@ -828,28 +975,19 @@ export default {
       station_title: 'Create your own wallet',
       station_body:
         'Create your own wallet and manage your digital assets. You can add users, set permissions and manage request approval policies.',
-      station_name_field: 'Wallet Name',
-      admin_name_field: 'Your username',
+      station_name_field: 'How would you like to name your wallet?',
+      admin_name_field: 'What is your name?',
 
-      check_permissions_title: 'Checking waiting list status...',
-      join_waitlist_title: 'Join waiting list',
-      join_waitlist_body:
-        "Join Orbit's waiting list! Enter your email to get early access and exclusive updates. Your journey starts now.",
-      join_waitlist_email_field: 'Enter your email address',
-      join_waitlist: 'Sign up now',
-
-      waitlist_pending_title: 'You are on the waiting list!',
-      waitlist_pending_body:
-        'Please wait for the approval. You will receive an email once your request is approved.',
-
-      waitlist_check_error_title: 'Failed to check waiting list status',
-      waitlist_check_error_body: 'Failed to check waiting list status, please try again.',
+      check_permissions_title: 'Checking deployment eligibility...',
 
       quota_exceed_error_title: 'Quota exceeded',
       quota_exceed_error_body: 'You have reached the maximum number of wallets you can create.',
 
       waitlist_denied_title: "You've been denied access.",
-      waitlist_denied_body: 'Unfortunately, you are not eligible to join the waiting list.',
+      waitlist_denied_body: 'Unfortunately, you are not eligible to deploy a wallet.',
+
+      deployment_check_error_title: 'Failed to check deployment eligibility',
+      deployment_check_error_body: 'Failed to check deployment eligibility, please try again.',
 
       status_starting: 'Initializing, please wait ...',
       status_deploying: 'Deploying your wallet to the Internet Computer ...',
@@ -868,8 +1006,36 @@ export default {
     },
     request_policies: {
       title: 'Request Policies',
-      create_label: 'Add Policy',
-      dialog_title: 'Policy',
+      create_label: 'Add Request Policy',
+      dialog_title: 'Request Policy',
+    },
+    assets: {
+      title: 'Assets',
+      btn_new_entry: 'New asset',
+      no_results_found: 'No assets found.',
+      error_fetching_assets: 'Error fetching assets, please try again.',
+      forms: {
+        ledger_canister_id: 'Ledger Canister ID',
+        index_canister_id: 'Index Canister ID',
+        decimals: 'Decimals',
+      },
+      well_known: {
+        groups: {
+          sns: 'SNS tokens',
+          ck_tokens: 'Chain-key tokens',
+        },
+        placeholder: 'Search asset...',
+        option_add_well_known_assets: 'Add well known assets',
+        option_add_custom_asset: 'Add custom asset',
+      },
+    },
+    approval_rules: {
+      btn_new_entry: 'Add approval rule',
+      title: 'Approval rule',
+      dialog: {
+        title: 'Approval rule',
+      },
+      linked_policies: 'Linked policies',
     },
     not_found: {
       title: 'Whoops, 404',
@@ -895,6 +1061,60 @@ export default {
       title: 'Error',
       subtitle: 'An error occurred while loading the page.',
     },
+    disaster_recovery: {
+      title: 'Disaster Recovery',
+      upgrader_status: 'Upgrader Status',
+      loading_upgrader: 'Loading upgrader...',
+
+      disaster_recovery_state: 'Disaster Recovery State',
+      disaster_recovery_state_loading: 'Loading disaster recovery state...',
+
+      recent_logs: 'Recent Logs',
+
+      select_orbit_station_version: 'Select Orbit station version',
+
+      submit_recovery_request: 'Submit Disaster Recovery Request',
+      submit_button: 'Submit Disaster Recovery Request',
+
+      station_idl: 'Station IDL',
+      upgrader_idl: 'Upgrader IDL',
+
+      station_service_payload: 'Station Service Payload',
+
+      result: 'Result',
+
+      recovery_instructions: 'Contact your wallet administrator to obtain a recovery payload.',
+      error_logs_unauthorized: 'Unauthorized to query logs',
+      error_state_unauthorized: 'Unauthorized to query state',
+
+      error_state: 'Failed to get upgrader: {error}',
+      error_no_upgrader_found: 'No upgrader found',
+      error_state_loading_failed: 'Failed to get disaster recovery state: {error}',
+      error_logs_loading_failed: 'Failed to get logs: {error}',
+
+      error_registry_loading_failed: 'Failed to query update registry: {error}',
+
+      success_submit_recovery: 'Recovery request submitted successfully',
+      error_submit_recovery: 'Failed to submit recovery request: {error}',
+
+      help_block: `
+<p>Disaster recovery is intended for recovering access to assets in the event the station canister becomes non-operational or inaccessible. It works by submitting a recovery request to the station's upgrader canister that stores, among other things, a backup of the station's core user data and account information.</p>
+<p>Submitting a recovery request involves constructing a recovery payload, which is a Candid value specifying the user and account data to be recovered, the station version to be used, and the method of recovery (i.e., install/reinstall/upgrade).</p>
+<p>The upgrader canister stores a set of users called the "disaster recovery committee" that need to reach consensus on the disaster recovery request in order for the recovery process to start. The number of users that need to reach consensus is called the "quorum". This information is queried and displayed in the "Upgrader status" card.</p>
+<p>The recovery process is as follows:</p>
+<ol>
+<li>From the version upgrade registry, select the version of the station you wish to recover to. The station IDL (the API definition of the station) is displayed for the selected version.</li>
+<li>Construct the service initialization Candid payload (e.g., for \`(opt SystemInstall)\`) that will be used as the argument for the reinstall/install/upgrade operation. If the upgrader canister is sufficiently up to date, then the UI will automatically fill that out based on the upgrader's backup storage. Constructing a valid payload will result in a binary representation of the payload that needs to be used in the next step.</li>
+<li>The page will display the upgrader IDL (the API definition of the upgrader) currently in use for the station. Construct the disaster recovery request payload (for type \`RequestDisasterRecoveryInput\`) using the IDL and the payload from the previous step. The UI will automatically fill out the payload for you if the argument payload is available.</li>
+<li>When the final payload is valid, click the submit button to submit the recovery request.</li>
+<li>A sufficient number of users (i.e., exactly \`quorum\` amount) have to submit the same recovery request before the recovery process can start. Users can re-submit requests multiple times; each submission will override the previous one.</li>
+<li>The recovery process will start after the quorum is reached. The upgrader will perform the operation specified in the payload.</li>
+</ol>
+<p>Good luck!</p>`,
+
+      warning_block:
+        'Warning: disaster recovery is a complex process that could lead to irreversible loss of access to assets if performed incorrectly. Please seek assistance from members of the foundation on the forum.',
+    },
   },
   session: {
     expired_dialog_title: 'Your session has expired',
@@ -902,14 +1122,27 @@ export default {
     expired_dialog_btn: 'Reauthenticate',
   },
   permissions: {
-    resource_title: 'Resource',
-    group_members_title: 'Members of groups',
-    specific_users_title: 'Specific users',
-    everyone_title: 'Everyone',
-    individual_resources_title: 'Individual resource access',
-    select_resource: 'Resource Type',
+    global_permissions: 'Global Permissions',
+    global_permissions_description:
+      "Global permissions apply to all areas of the system, such as accounts, the address book, or other features. These permissions are not tied to a specific item. To configure permissions for a particular area (e.g., a specific account), visit that item's configuration page and update the settings there.",
+    action_approval_legend:
+      'Actions users can perform (e.g. create a transfer), might require additional approvals before being executed.',
+    permitted_users: 'Permitted users',
+    restrict_permitted_users: 'Restrict to certain users...',
+    no_users_found: 'No users found.',
+    allow: {
+      no_access: 'Disabled for Everyone',
+      no_access_tooltip: 'Not accessible by anyone, including logged-in users.',
+      public: 'Public (No Login Required)',
+      public_tooltip: 'Accessible by anyone, including non-logged-in visitors.',
+      authenticated: 'All Logged-In Users',
+      authenticated_tooltip: 'Accessible by any user who is logged in.',
+      restricted: 'Specific Users/Groups',
+      restricted_tooltip: 'Accessible only to the selected users or groups.',
+    },
     resources: {
       account: 'Account',
+      asset: 'Asset',
       user: 'User',
       usergroup: 'User Group',
       permission: 'Access Policy',
@@ -920,40 +1153,170 @@ export default {
       addressbook: 'Address Book',
       managesysteminfo: 'Manage System Info',
       externalcanister: 'External Canister',
+      namedrule: 'Approval Rule',
+    },
+    categories: {
+      treasury: 'Treasury (accounts, assets, etc...)',
+      canisters: 'Canisters/Applications',
+      users: 'Users',
+      system: 'System (Software updates, Permissions, Approval Policies, etc...)',
     },
     actions: {
-      list: 'List',
-      create: 'Create',
-      read: 'Read',
-      update: 'Update',
-      delete: 'Delete',
-      transfer: 'Transfer',
-      capabilities: 'Capabilities',
-      systeminfo: 'System info',
-      systeminfocapabilities: 'Capabilities (Supported Assets)',
-      systeminfoconfig: 'Configuration (Upgrades, Metrics, Usage)',
-      managesysteminfo: 'Manage System Info (e.g. name)',
-      systemupgrade: 'Upgrade',
-      change: 'Change',
-      fund: 'Fund',
-      callcanister: 'Call',
-    },
-    allow: {
-      public: 'Anyone',
-      authenticated: 'Authenticated',
-      restricted: 'Restricted',
+      account_list: 'View Accounts Page',
+      account_list_description:
+        'Allows access to the accounts page, but only displays accounts the user has permission to view.',
+      account_read_any: 'View All Accounts',
+      account_read_any_description:
+        'Grants access to view all accounts, including balances and associated assets.',
+      account_create: 'Add New Accounts',
+      account_create_description:
+        'Allows the creation of new accounts and assigning assets (e.g., ICP, ckBTC).',
+      account_update_any: 'Edit Accounts',
+      account_update_any_description:
+        'Grants permission to edit account details, including permissions and approval policies.',
+      account_transfer_any: 'Create Transfers',
+      account_transfer_any_description:
+        'Allows the user to initiate transfers from any account within the wallet.',
+
+      addressbook_list: 'View Address Book Page',
+      addressbook_list_description:
+        'Grants access to the address book page, showing only entries the user can view.',
+      addressbook_read_any: 'View All Address Book Entries',
+      addressbook_read_any_description: 'Allows access to all address book entries.',
+      addressbook_create: 'Add New Address Book Entries',
+      addressbook_create_description:
+        'Enables adding new contacts, including metadata such as names and additional details.',
+      addressbook_update_any: 'Edit Address Book Entries',
+      addressbook_update_any_description:
+        'Allows editing existing address book entries, including metadata.',
+      addressbook_delete_any: 'Delete Address Book Entries',
+      addressbook_delete_any_description:
+        'Grants permission to delete address book entries. ⚠ Note: Entries may be used in approval policies to restrict or allow transfers, so deletion should be handled with care.',
+
+      asset_list: 'View Assets Page',
+      asset_list_description:
+        'Grants access to the assets page, but only displays assets the user can view.',
+      asset_read_any: 'View All Assets',
+      asset_read_any_description: 'Allows viewing of all assets and their details.',
+      asset_create: 'Add New Assets',
+      asset_create_description:
+        'Enables adding new assets to the wallet, which can then be assigned to accounts.',
+      asset_update_any: 'Edit Assets',
+      asset_update_any_description:
+        'Grants permission to edit asset details, including associated permissions and approval policies.',
+      asset_delete_any: 'Delete Assets',
+      asset_delete_any_description:
+        'Allows asset deletion. ⚠ Note: Deleting an asset will remove it from all accounts.',
+
+      externalcanister_list: 'View Canisters Page',
+      externalcanister_list_description:
+        'Grants access to the canisters page, showing only canisters the user can view.',
+      externalcanister_read_any: 'View All Canisters',
+      externalcanister_read_any_description:
+        'Allows access to view all canisters and their details.',
+      externalcanister_create: 'Add New Canisters',
+      externalcanister_create_description:
+        'Enables adding new or existing canisters to the wallet. The wallet can either fully control these canisters or act as a monitoring and authorization layer.',
+      externalcanister_change_any: 'Edit Canisters',
+      externalcanister_change_any_description:
+        'Grants permission to modify canister details, permissions, approval policies, settings, and controllers.',
+      externalcanister_fund_any: 'Fund Canisters',
+      externalcanister_fund_any_description:
+        'Allows the user to top up canisters with cycles using the wallet.',
+      externalcanister_call_execution_method_any_validation_method_no: 'Call Canisters',
+      externalcanister_call_execution_method_any_validation_method_no_description:
+        'Enables making calls to any canister through the wallet. ⚠ Note: This permission allows execution of arbitrary calls to canisters, so proper approval policies should be enforced.',
+
+      user_list: 'View Users Page',
+      user_list_description:
+        'Grants access to the users page, showing only users the user can view.',
+      user_read_any: 'View All Users',
+      user_read_any_description: 'Allows access to view all users and their details.',
+      user_create: 'Add New Users',
+      user_create_description: 'Enables adding new users to the wallet.',
+      user_update_any: 'Edit Users',
+      user_update_any_description:
+        'Grants permission to edit user details, including associated identities and status.',
+
+      usergroup_list: 'View User Groups Page',
+      usergroup_list_description:
+        'Grants access to the user groups page, but only for groups the user can view.',
+      usergroup_read_any: 'View All User Groups',
+      usergroup_read_any_description: 'Allows viewing of all user groups and their details.',
+      usergroup_create: 'Add New User Groups',
+      usergroup_create_description: 'Enables adding new user groups to the wallet.',
+      usergroup_update_any: 'Edit User Groups',
+      usergroup_update_any_description: 'Grants permission to modify user group details.',
+      usergroup_delete_any: 'Delete User Groups',
+      usergroup_delete_any_description:
+        'Allows deleting user groups. ⚠ Note: Deleting a user group removes it from all associated users and may impact approval policies that rely on it.',
+
+      system_capabilities: 'View Supported Assets',
+      system_capabilities_description:
+        'Can view the list of supported assets, including their symbols, names, and metadata.',
+      system_systeminfo: 'View System Information',
+      system_systeminfo_description:
+        'Allows viewing of system-wide information such as the wallet version, upgrader ID, and cycle balances.',
+      system_managesysteminfo: 'Manage System Information',
+      system_managesysteminfo_description:
+        'Grants permission to modify system settings, including the wallet name.',
+      system_upgrade: 'Perform System Upgrade',
+      system_upgrade_description:
+        'Allows upgrading the wallet to a new version. ⚠ Note: Upgrades can affect the availability and functionality of the wallet.',
+
+      permission_update: 'Manage Permissions',
+      permission_update_description:
+        'Grants full control over wallet permissions, including adding, updating, and removing permissions.',
+
+      requestpolicy_list: 'View Request Policies Tab',
+      requestpolicy_list_description:
+        'Grants access to the request policies tab, showing only policies the user can view.',
+      requestpolicy_read_any: 'View All Request Policies',
+      requestpolicy_read_any_description:
+        'Allows viewing of all request policies and their details.',
+      requestpolicy_create: 'Add New Request Policies',
+      requestpolicy_create_description: 'Enables adding new request policies to the wallet.',
+      requestpolicy_update_any: 'Edit Request Policies',
+      requestpolicy_update_any_description: 'Grants permission to modify request policies.',
+      requestpolicy_delete_any: 'Delete Request Policies',
+      requestpolicy_delete_any_description:
+        'Allows deleting request policies. ⚠ Note: Deleting a request policy may impact the functionality of the wallet.',
+
+      request_list: 'View Requests Page',
+      request_list_description:
+        'Allows access to the requests page, showing only requests the user can view. In most cases, this should be available to all users so they can track requests requiring their approval.',
+      request_read_any: 'View All Requests',
+      request_read_any_description:
+        'Enables viewing of all requests, including those submitted by other users.',
+
+      namedrule_list: 'View Approval Rules Tab',
+      namedrule_list_description:
+        'Grants access to the approval rules tab, showing only rules the user can view.',
+      namedrule_read_any: 'View All Approval Rules',
+      namedrule_read_any_description: 'Allows viewing of all approval rules and their details.',
+
+      namedrule_create: 'Add New Approval Rules',
+      namedrule_create_description: 'Enables adding new approval rules to the wallet.',
+      namedrule_update_any: 'Edit Approval Rules',
+      namedrule_update_any_description: 'Grants permission to modify approval rules.',
+      namedrule_delete_any: 'Delete Approval Rules',
+      namedrule_delete_any_description: 'Allows deleting approval rules.',
     },
   },
   request_policies: {
     user_type_select: 'User type',
     add_rule_label: 'Add rule +',
     unsupported_specifier: 'Unsupported specifier definition',
+    rule_groups: {
+      custom_rules: 'Custom rules',
+      named_rules: 'Approval rules',
+    },
     rule_user_specifier: {
       owner: 'Owner',
       requester: 'Requester',
       any: 'Any user',
-      group: 'Member of group',
-      id: 'Specific user',
+      group: 'Member of group(s)',
+      id: 'Specific user(s)',
     },
     rule: {
       allof: 'all of',
@@ -964,6 +1327,30 @@ export default {
       quorumpercentage: 'Quorum percentage',
       allowlistedbymetadata: 'Allowlisted by metadata',
       allowlisted: 'Allowlisted',
+      named_rule: 'Use approval rule: {name}',
+    },
+    rule_tooltip_summary: {
+      allof: 'All of the following:',
+      anyof: 'Any of the following:',
+      not: 'Approved, except when:',
+    },
+    rule_rich_summary: {
+      complex_rule: 'Complex rule',
+      no_user_specifier: 'No user list',
+      any_user_specifier: '1 approval from any user|{n} approvals from any user',
+      auto_approved: 'No approval required',
+      invalid_rule_auto_approved: 'Invalid rule: Auto-approved',
+      single_user_specifier: '{user} approves',
+      user_specifier: '{n} approval from {users}|{n} approvals from {users}',
+      group_specifier: '{n} approval from {groups}|{n} approvals from {groups}',
+      quorum_percentage_any_user: '{n}% approval of all users',
+      quorum_percentage_rule: '{n}% approval from {users}',
+      allowlisted_by_metadata: 'Address marked with {metadata}',
+      allowlisted: 'Address in address book',
+      not: 'Not: {rule}',
+      allof: ' AND ',
+      anyof: ' OR ',
+      named_rule: 'Use approval rule: {name}',
     },
     specifier: {
       editpermission: 'Edit permission',
@@ -988,10 +1375,17 @@ export default {
       setdisasterrecovery: 'Configure disaster recovery',
       callexternalcanister: 'Call canister',
       createexternalcanister: 'Create canister',
+      addasset: 'Add asset',
+      editasset: 'Edit asset',
+      removeasset: 'Remove asset',
+      addnamedrule: 'Add approval rule',
+      editnamedrule: 'Edit approval rule',
+      removenamedrule: 'Remove approval rule',
     },
   },
   cycle_obtain_strategies: {
     disabled: 'Disabled',
     mintfromnativetoken: 'Mint from ICP account',
+    withdrawfromcyclesledger: 'Withdraw from Cycles Ledger',
   },
 };

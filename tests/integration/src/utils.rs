@@ -1,34 +1,45 @@
 use crate::setup::{create_canister, get_canister_wasm, WALLET_ADMIN_USER};
-use candid::{CandidType, Encode, Principal};
+use crate::station_test_data::asset::list_assets;
+use crate::system_upgrade_tests::STATION_UPGRADE_EXTRA_TICKS;
+use candid::utils::ArgumentDecoder;
+use candid::Principal;
+use candid::{decode_args, CandidType, Encode};
 use control_panel_api::UploadCanisterModulesInput;
 use flate2::{write::GzEncoder, Compression};
-use ic_cdk::api::management_canister::main::CanisterStatusResponse;
 use ic_certified_assets::types::{
     BatchOperation, CommitBatchArguments, CreateAssetArguments, CreateBatchResponse,
     CreateChunkArg, CreateChunkResponse, SetAssetContentArguments,
 };
+use ic_management_canister_types::CanisterStatusResult;
 use orbit_essentials::api::ApiResult;
 use orbit_essentials::cdk::api::management_canister::main::CanisterId;
 use orbit_essentials::types::WasmModuleExtraChunks;
-use pocket_ic::{query_candid_as, update_candid_as, CallError, PocketIc, UserError, WasmResult};
+use orbit_essentials::utils::timestamp_to_rfc3339;
+use pocket_ic::{query_candid_as, update_candid_as, PocketIc, RejectResponse};
 use sha2::Digest;
 use sha2::Sha256;
 use station_api::{
     AccountDTO, AddAccountOperationInput, AddUserOperationInput, AllowDTO, ApiErrorDTO,
-    CreateRequestInput, CreateRequestResponse, GetPermissionResponse, GetRequestInput,
-    GetRequestResponse, HealthStatus, MeResponse, QuorumPercentageDTO, RequestApprovalStatusDTO,
-    RequestDTO, RequestExecutionScheduleDTO, RequestOperationDTO, RequestOperationInput,
-    RequestPolicyRuleDTO, RequestStatusDTO, ResourceIdDTO, SetDisasterRecoveryOperationDTO,
-    SetDisasterRecoveryOperationInput, SubmitRequestApprovalInput, SubmitRequestApprovalResponse,
-    SystemInfoDTO, SystemInfoResponse, UserDTO, UserSpecifierDTO, UserStatusDTO, UuidDTO,
+    CreateRequestInput, CreateRequestResponse, FetchAccountBalancesInput,
+    FetchAccountBalancesResponse, GetPermissionResponse, GetRequestInput, GetRequestResponse,
+    GetTransfersInput, GetTransfersResponse, HealthStatus, MeResponse, QuorumPercentageDTO,
+    RequestApprovalStatusDTO, RequestDTO, RequestExecutionScheduleDTO, RequestOperationDTO,
+    RequestOperationInput, RequestPolicyRuleDTO, RequestStatusDTO, ResourceIdDTO,
+    SetDisasterRecoveryOperationDTO, SetDisasterRecoveryOperationInput, SubmitRequestApprovalInput,
+    SubmitRequestApprovalResponse, SystemInfoDTO, SystemInfoResponse, SystemInstall, SystemUpgrade,
+    SystemUpgradeOperationInput, SystemUpgradeTargetDTO, UserDTO, UserSpecifierDTO, UserStatusDTO,
+    UuidDTO,
 };
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
-use upgrader_api::{GetDisasterRecoveryStateResponse, GetLogsInput, GetLogsResponse};
+use upgrader_api::{
+    GetDisasterRecoveryStateResponse, GetLogsInput, GetLogsResponse, LogEntry, PaginationInput,
+};
 use uuid::Uuid;
 
-pub const ADMIN_GROUP_ID: Uuid = Uuid::from_u128(302240678275694148452352); // very first uuidv4 generated
+pub const ADMIN_GROUP_ID: Uuid = Uuid::from_u128(302240678275694148452352); // 00000000-0000-4000-8000-000000000000
+pub const OPERATOR_GROUP_ID: Uuid = Uuid::from_u128(302240678275694148452353); // 00000000-0000-4000-8000-000000000001
 pub const NNS_ROOT_CANISTER_ID: Principal = Principal::from_slice(&[0, 0, 0, 0, 0, 0, 0, 3, 1, 1]);
 
 pub const COUNTER_WAT: &str = r#"
@@ -119,31 +130,41 @@ pub fn user_test_id(n: u64) -> Principal {
     Principal::from_slice(&bytes)
 }
 
-pub fn get_request(
+pub fn try_get_request(
     env: &PocketIc,
     user_id: Principal,
     station_canister_id: CanisterId,
     request: RequestDTO,
-) -> RequestDTO {
+) -> Result<Result<RequestDTO, ApiErrorDTO>, RejectResponse> {
     let get_request_args = GetRequestInput {
         request_id: request.id,
         with_full_info: Some(false),
     };
-    let res: (Result<GetRequestResponse, ApiErrorDTO>,) = update_candid_as(
+    update_candid_as::<_, (Result<GetRequestResponse, ApiErrorDTO>,)>(
         env,
         station_canister_id,
         user_id,
         "get_request",
         (get_request_args,),
     )
-    .unwrap();
-    res.0.unwrap().request
+    .map(|resp| resp.0.map(|resp| resp.request))
+}
+
+pub fn get_request(
+    env: &PocketIc,
+    user_id: Principal,
+    station_canister_id: CanisterId,
+    request: RequestDTO,
+) -> RequestDTO {
+    try_get_request(env, user_id, station_canister_id, request)
+        .unwrap()
+        .unwrap()
 }
 
 fn is_request_completed(request: RequestDTO) -> bool {
     match request.status {
         RequestStatusDTO::Completed { .. } => true,
-        RequestStatusDTO::Rejected { .. }
+        RequestStatusDTO::Rejected
         | RequestStatusDTO::Cancelled { .. }
         | RequestStatusDTO::Failed { .. }
         | RequestStatusDTO::Created
@@ -156,7 +177,7 @@ fn is_request_completed(request: RequestDTO) -> bool {
 fn is_request_evaluated(request: RequestDTO) -> bool {
     match request.status {
         RequestStatusDTO::Completed { .. }
-        | RequestStatusDTO::Rejected { .. }
+        | RequestStatusDTO::Rejected
         | RequestStatusDTO::Cancelled { .. }
         | RequestStatusDTO::Failed { .. } => true,
         RequestStatusDTO::Created
@@ -166,17 +187,50 @@ fn is_request_evaluated(request: RequestDTO) -> bool {
     }
 }
 
+pub fn submit_delayed_request_raw(
+    env: &PocketIc,
+    user_id: Principal,
+    station_canister_id: CanisterId,
+    request_operation_input: RequestOperationInput,
+    delay: Duration,
+) -> Result<(Result<CreateRequestResponse, ApiErrorDTO>,), RejectResponse> {
+    let execution_time = env.get_time() + delay;
+    let execution_time_nanos = timestamp_to_rfc3339(&execution_time.as_nanos_since_unix_epoch());
+
+    let create_request_input = CreateRequestInput {
+        operation: request_operation_input,
+        title: None,
+        summary: None,
+        execution_plan: Some(RequestExecutionScheduleDTO::Scheduled {
+            execution_time: execution_time_nanos,
+        }),
+        expiration_dt: None,
+        deduplication_key: None,
+        tags: None,
+    };
+    update_candid_as(
+        env,
+        station_canister_id,
+        user_id,
+        "create_request",
+        (create_request_input,),
+    )
+}
+
 pub fn submit_request_raw(
     env: &PocketIc,
     user_id: Principal,
     station_canister_id: CanisterId,
     request_operation_input: RequestOperationInput,
-) -> Result<(Result<CreateRequestResponse, ApiErrorDTO>,), CallError> {
+) -> Result<(Result<CreateRequestResponse, ApiErrorDTO>,), RejectResponse> {
     let create_request_input = CreateRequestInput {
         operation: request_operation_input,
         title: None,
         summary: None,
         execution_plan: Some(RequestExecutionScheduleDTO::Immediate),
+        expiration_dt: None,
+        deduplication_key: None,
+        tags: None,
     };
     update_candid_as(
         env,
@@ -203,11 +257,9 @@ pub fn submit_request_with_expected_trap(
     station_canister_id: CanisterId,
     request_operation_input: RequestOperationInput,
 ) -> String {
-    let res = submit_request_raw(env, user_id, station_canister_id, request_operation_input);
-    match res.unwrap_err() {
-        CallError::UserError(error) => error.description,
-        CallError::Reject(message) => panic!("Unexpected reject: {}", message),
-    }
+    submit_request_raw(env, user_id, station_canister_id, request_operation_input)
+        .unwrap_err()
+        .reject_message
 }
 
 pub fn wait_for_request(
@@ -226,6 +278,16 @@ pub fn wait_for_request_with_extra_ticks(
     request: RequestDTO,
     extra_ticks: u64,
 ) -> Result<RequestDTO, Option<RequestStatusDTO>> {
+    // wait for the request to be approved
+    env.advance_time(Duration::from_secs(2));
+    env.tick();
+    // wait for the request to be processing
+    env.advance_time(Duration::from_secs(2));
+    env.tick();
+    // wait in case the request calls out to other canisters
+    env.advance_time(Duration::from_secs(2));
+    env.tick();
+
     for _ in 0..extra_ticks {
         // timer's period for processing requests is 5 seconds
         env.advance_time(Duration::from_secs(5));
@@ -301,7 +363,7 @@ pub fn get_system_info(
     user_id: Principal,
     station_canister_id: CanisterId,
 ) -> SystemInfoDTO {
-    await_station_healthy(env, station_canister_id);
+    await_station_healthy(env, station_canister_id, user_id);
     let res: (ApiResult<SystemInfoResponse>,) =
         update_candid_as(env, station_canister_id, user_id, "system_info", ()).unwrap();
     res.0.unwrap().system
@@ -359,7 +421,7 @@ pub fn canister_status(
     env: &PocketIc,
     sender: Option<Principal>,
     canister_id: Principal,
-) -> CanisterStatusResponse {
+) -> CanisterStatusResult {
     env.canister_status(canister_id, sender).unwrap()
 }
 
@@ -410,7 +472,7 @@ pub fn advance_time_to_burn_cycles(
     }
 
     // advance time to burn the remaining cycles
-    let advance_times_to_burn_cycles = (cycles_to_burn + burned_cycles - 1) / burned_cycles;
+    let advance_times_to_burn_cycles = cycles_to_burn.div_ceil(burned_cycles);
     let burn_duration = Duration::from_secs(jump_secs * advance_times_to_burn_cycles as u64);
     env.advance_time(burn_duration);
     env.tick();
@@ -438,12 +500,8 @@ pub fn update_raw(
     sender: Principal,
     method: &str,
     payload: Vec<u8>,
-) -> Result<Vec<u8>, UserError> {
+) -> Result<Vec<u8>, RejectResponse> {
     env.update_call(canister_id, sender, method, payload)
-        .map(|res| match res {
-            WasmResult::Reply(bytes) => bytes,
-            WasmResult::Reject(message) => panic!("Unexpected reject: {}", message),
-        })
 }
 
 pub fn get_upgrader_disaster_recovery(
@@ -498,6 +556,32 @@ pub fn get_upgrader_logs(
     .expect("Failed query call to get disaster recovery logs");
 
     res.0.expect("Failed to get disaster recovery logs")
+}
+
+pub fn get_all_upgrader_logs(
+    env: &PocketIc,
+    upgrader_id: &Principal,
+    sender: &Principal,
+) -> Vec<LogEntry> {
+    let pagination = PaginationInput {
+        offset: Some(0),
+        limit: Some(100),
+    };
+    let res: (ApiResult<GetLogsResponse>,) = query_candid_as(
+        env,
+        upgrader_id.to_owned(),
+        *sender,
+        "get_logs",
+        (GetLogsInput {
+            pagination: Some(pagination),
+        },),
+    )
+    .expect("Failed query call to get disaster recovery logs");
+
+    let logs = res.0.expect("Failed to get disaster recovery logs");
+    assert_eq!(logs.logs.len(), logs.total as usize);
+    assert!(logs.next_offset.is_none());
+    logs.logs
 }
 
 pub fn get_account_read_permission(
@@ -576,11 +660,12 @@ pub fn get_account_transfer_permission(
 }
 
 pub fn create_icp_account(env: &PocketIc, station_id: Principal, user_id: UuidDTO) -> AccountDTO {
+    let icp = get_icp_asset(env, station_id, WALLET_ADMIN_USER);
+
     // create account
     let create_account_args = AddAccountOperationInput {
         name: "test".to_string(),
-        blockchain: "icp".to_string(),
-        standard: "native".to_string(),
+        assets: vec![icp.id.clone()],
         read_permission: AllowDTO {
             auth_scope: station_api::AuthScopeDTO::Restricted,
             user_groups: vec![],
@@ -610,16 +695,29 @@ pub fn create_icp_account(env: &PocketIc, station_id: Principal, user_id: UuidDT
         )),
         metadata: vec![],
     };
+
+    create_account(env, station_id, WALLET_ADMIN_USER, create_account_args)
+}
+
+pub fn create_account(
+    env: &PocketIc,
+    station_id: Principal,
+    requester: Principal,
+    input: AddAccountOperationInput,
+) -> AccountDTO {
     let add_account_request = CreateRequestInput {
-        operation: RequestOperationInput::AddAccount(create_account_args),
+        operation: RequestOperationInput::AddAccount(input),
         title: None,
         summary: None,
         execution_plan: Some(RequestExecutionScheduleDTO::Immediate),
+        expiration_dt: None,
+        deduplication_key: None,
+        tags: None,
     };
     let res: (ApiResult<CreateRequestResponse>,) = update_candid_as(
         env,
         station_id,
-        WALLET_ADMIN_USER,
+        requester,
         "create_request",
         (add_account_request,),
     )
@@ -631,7 +729,7 @@ pub fn create_icp_account(env: &PocketIc, station_id: Principal, user_id: UuidDT
 
     let account_creation_request_dto = res.0.unwrap().request;
     match account_creation_request_dto.status {
-        RequestStatusDTO::Approved { .. } => {}
+        RequestStatusDTO::Approved => {}
         _ => {
             panic!("request must be approved by now");
         }
@@ -649,7 +747,7 @@ pub fn create_icp_account(env: &PocketIc, station_id: Principal, user_id: UuidDT
     let res: (ApiResult<CreateRequestResponse>,) = update_candid_as(
         env,
         station_id,
-        WALLET_ADMIN_USER,
+        requester,
         "get_request",
         (get_request_args,),
     )
@@ -673,6 +771,140 @@ pub fn create_icp_account(env: &PocketIc, station_id: Principal, user_id: UuidDT
             panic!("request must be AddAccount");
         }
     }
+}
+
+pub fn create_transfer(
+    env: &PocketIc,
+    station_id: Principal,
+    requester: Principal,
+    input: station_api::TransferOperationInput,
+) -> station_api::TransferDTO {
+    // make transfer request to beneficiary
+
+    let transfer_request = CreateRequestInput {
+        operation: RequestOperationInput::Transfer(input),
+        title: None,
+        summary: None,
+        expiration_dt: None,
+        execution_plan: Some(RequestExecutionScheduleDTO::Immediate),
+        deduplication_key: None,
+        tags: None,
+    };
+    let res: (Result<CreateRequestResponse, ApiErrorDTO>,) = update_candid_as(
+        env,
+        station_id,
+        requester,
+        "create_request",
+        (transfer_request,),
+    )
+    .unwrap();
+    let request_dto = res.0.unwrap().request;
+
+    // wait for the request to be approved (timer's period is 5 seconds)
+    env.advance_time(Duration::from_secs(5));
+    env.tick();
+    // wait for the request to be processing (timer's period is 5 seconds) and first is set to processing
+    env.advance_time(Duration::from_secs(5));
+    env.tick();
+    env.tick();
+    env.tick();
+    env.advance_time(Duration::from_secs(5));
+    env.tick();
+    env.tick();
+    env.tick();
+
+    // check transfer request status
+    let get_request_args = GetRequestInput {
+        request_id: request_dto.id.clone(),
+        with_full_info: Some(false),
+    };
+    let res: (Result<GetRequestResponse, ApiErrorDTO>,) = update_candid_as(
+        env,
+        station_id,
+        requester,
+        "get_request",
+        (get_request_args,),
+    )
+    .unwrap();
+    let new_request_dto = res.0.unwrap().request;
+    match new_request_dto.status {
+        RequestStatusDTO::Completed { .. } => {}
+        _ => {
+            panic!(
+                "request must be completed by now but instead is {:?}",
+                new_request_dto.status
+            );
+        }
+    };
+
+    // request has the transfer id filled out
+    let transfer_id = match new_request_dto.operation {
+        RequestOperationDTO::Transfer(transfer) => transfer
+            .transfer_id
+            .expect("transfer id must be set for completed transfer"),
+        _ => {
+            panic!("request must be Transfer");
+        }
+    };
+
+    // fetch the transfer and check if its request id matches the request id that created it
+    let res: (Result<GetTransfersResponse, ApiErrorDTO>,) = query_candid_as(
+        env,
+        station_id,
+        requester,
+        "get_transfers",
+        (GetTransfersInput {
+            transfer_ids: vec![transfer_id],
+        },),
+    )
+    .expect("Failed to send query call");
+
+    res.0
+        .expect("Failed to get transfers")
+        .transfers
+        .first()
+        .expect("no transfer in result")
+        .clone()
+}
+
+pub fn fetch_account_balances(
+    env: &PocketIc,
+    station_canister_id: Principal,
+    requester: Principal,
+    input: FetchAccountBalancesInput,
+) -> station_api::FetchAccountBalancesResponse {
+    update_candid_as::<(FetchAccountBalancesInput,), (ApiResult<FetchAccountBalancesResponse>,)>(
+        env,
+        station_canister_id,
+        requester,
+        "fetch_account_balances",
+        (input,),
+    )
+    .expect("Failed to send query call")
+    .0
+    .expect("Failed to get account balances")
+}
+
+pub fn get_icp_asset(
+    env: &PocketIc,
+    station_canister_id: Principal,
+    requester: Principal,
+) -> station_api::AssetDTO {
+    list_assets(env, station_canister_id, requester)
+        .expect("Failed to query list_assets")
+        .0
+        .expect("Failed to list assets")
+        .assets
+        .into_iter()
+        .find(|asset| asset.symbol == "ICP")
+        .expect("Failed to find ICP asset")
+}
+
+pub fn get_icp_account_identifier(addresses: &[station_api::AccountAddressDTO]) -> Option<String> {
+    addresses
+        .iter()
+        .find(|a| a.format == "icp_account_identifier")
+        .map(|a| a.address.clone())
 }
 
 /// Compresses the given data to a gzip format.
@@ -740,6 +972,7 @@ pub fn upload_canister_modules(env: &PocketIc, control_panel_id: Principal, cont
     res.0.unwrap();
 
     // upload station
+
     let station_wasm = get_canister_wasm("station");
     let (base_chunk, module_extra_chunks) =
         upload_canister_chunks_to_asset_canister(env, station_wasm, 500_000);
@@ -773,7 +1006,7 @@ struct StoreArg {
     pub sha256: Option<Vec<u8>>,
 }
 
-fn hash(data: &Vec<u8>) -> Vec<u8> {
+pub(crate) fn hash(data: &Vec<u8>) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(data);
     hasher.finalize().to_vec()
@@ -873,12 +1106,12 @@ pub fn upload_canister_chunks_to_asset_canister(
     (base_chunk.to_vec(), module_extra_chunks)
 }
 
-pub(crate) fn await_station_healthy(env: &PocketIc, station_id: Principal) {
+pub(crate) fn await_station_healthy(env: &PocketIc, station_id: Principal, user_id: Principal) {
     let max_rounds = 100;
     for _ in 0..max_rounds {
         env.tick();
         let res: (station_api::HealthStatus,) =
-            query_candid_as(env, station_id, WALLET_ADMIN_USER, "health_status", ())
+            query_candid_as(env, station_id, user_id, "health_status", ())
                 .expect("Unexpected error calling Station health_status");
         if res.0 == station_api::HealthStatus::Healthy {
             return;
@@ -933,4 +1166,198 @@ pub(crate) fn add_external_canister_call_any_method_permission_and_approval(
         }),
     )
     .expect("Failed to add approval policy to call external canister");
+}
+
+pub(crate) fn deploy_test_canister(env: &PocketIc, controller: Principal) -> Principal {
+    let test_canister = create_canister(env, controller);
+    let test_canister_wasm = get_canister_wasm("test_canister");
+    env.install_canister(test_canister, test_canister_wasm, vec![], Some(controller));
+    test_canister
+}
+
+pub fn expect_await_call_result<T>(result: Vec<u8>) -> T
+where
+    T: for<'a> ArgumentDecoder<'a>,
+{
+    decode_args(&result).expect("Failed to decode result")
+}
+
+pub(crate) fn set_disaster_recovery_committee(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    station_id: Principal,
+    committee: upgrader_api::DisasterRecoveryCommittee,
+) -> ApiResult {
+    let args = upgrader_api::SetDisasterRecoveryCommitteeInput { committee };
+    let res: (ApiResult,) = update_candid_as(
+        env,
+        upgrader_id,
+        station_id,
+        "set_disaster_recovery_committee",
+        (args,),
+    )
+    .expect("Failed update call to set disaster recovery committee");
+    res.0
+}
+
+pub(crate) fn get_disaster_recovery_committee(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    station_id: Principal,
+) -> Option<upgrader_api::DisasterRecoveryCommittee> {
+    let res: (ApiResult<upgrader_api::GetDisasterRecoveryCommitteeResponse>,) = query_candid_as(
+        env,
+        upgrader_id,
+        station_id,
+        "get_disaster_recovery_committee",
+        ((),),
+    )
+    .expect("Failed query call to get disaster recovery committee");
+    res.0.unwrap().committee
+}
+
+pub(crate) fn set_disaster_recovery_accounts(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    station_id: Principal,
+    accounts: Vec<upgrader_api::Account>,
+) -> ApiResult {
+    let args = upgrader_api::SetDisasterRecoveryAccountsInput { accounts };
+    let res: (ApiResult,) = update_candid_as(
+        env,
+        upgrader_id,
+        station_id,
+        "set_disaster_recovery_accounts",
+        (args,),
+    )
+    .expect("Failed update call to set disaster recovery accounts");
+    res.0
+}
+
+pub(crate) fn get_disaster_recovery_accounts(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    station_id: Principal,
+) -> Vec<upgrader_api::Account> {
+    let res: (ApiResult<upgrader_api::GetDisasterRecoveryAccountsResponse>,) = query_candid_as(
+        env,
+        upgrader_id,
+        station_id,
+        "get_disaster_recovery_accounts",
+        ((),),
+    )
+    .expect("Failed query call to get disaster recovery accounts");
+    res.0.unwrap().accounts
+}
+
+pub(crate) fn set_disaster_recovery_accounts_and_assets(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    station_id: Principal,
+    accounts: Vec<upgrader_api::MultiAssetAccount>,
+    assets: Vec<upgrader_api::Asset>,
+) -> ApiResult {
+    let args = upgrader_api::SetDisasterRecoveryAccountsAndAssetsInput { accounts, assets };
+    let res: (ApiResult,) = update_candid_as(
+        env,
+        upgrader_id,
+        station_id,
+        "set_disaster_recovery_accounts_and_assets",
+        (args,),
+    )
+    .expect("Failed update call to set disaster recovery accounts and assets");
+    res.0
+}
+
+pub(crate) fn get_disaster_recovery_accounts_and_assets(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    station_id: Principal,
+) -> (
+    Vec<upgrader_api::MultiAssetAccount>,
+    Vec<upgrader_api::Asset>,
+) {
+    let res: (ApiResult<upgrader_api::GetDisasterRecoveryAccountsAndAssetsResponse>,) =
+        query_candid_as(
+            env,
+            upgrader_id,
+            station_id,
+            "get_disaster_recovery_accounts_and_assets",
+            ((),),
+        )
+        .expect("Failed query call to get disaster recovery accounts and assets");
+    let resp = res.0.unwrap();
+    (resp.accounts, resp.assets)
+}
+
+pub(crate) fn request_disaster_recovery(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    user: Principal,
+    request: upgrader_api::RequestDisasterRecoveryInput,
+) -> ApiResult {
+    let res: (ApiResult<()>,) = update_candid_as(
+        env,
+        upgrader_id,
+        user,
+        "request_disaster_recovery",
+        (request,),
+    )
+    .expect("Failed update call to request disaster recovery");
+    res.0
+}
+
+pub(crate) fn get_disaster_recovery_state(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    user: Principal,
+) -> upgrader_api::GetDisasterRecoveryStateResponse {
+    let res: (ApiResult<upgrader_api::GetDisasterRecoveryStateResponse>,) =
+        query_candid_as(env, upgrader_id, user, "get_disaster_recovery_state", ((),))
+            .expect("Failed query call to get disaster recovery state");
+    res.0.unwrap()
+}
+
+pub(crate) fn is_committee_member(
+    env: &PocketIc,
+    upgrader_id: Principal,
+    user: Principal,
+) -> ApiResult<bool> {
+    let res: (ApiResult<upgrader_api::IsCommitteeMemberResponse>,) =
+        query_candid_as(env, upgrader_id, user, "is_committee_member", ((),))
+            .expect("Failed query call to check committee membership");
+    res.0.map(|resp| resp.is_committee_member)
+}
+
+pub(crate) fn upgrade_station(
+    env: &PocketIc,
+    user: Principal,
+    station_id: Principal,
+    name: Option<String>,
+) {
+    // upload chunks to asset canister
+    let station_wasm = get_canister_wasm("station").to_vec();
+    let (base_chunk, module_extra_chunks) =
+        upload_canister_chunks_to_asset_canister(env, station_wasm, 200_000);
+
+    // create system upgrade request from chunks
+    let station_init_arg = SystemInstall::Upgrade(SystemUpgrade { name });
+    let station_init_arg_bytes = Encode!(&station_init_arg).unwrap();
+    let system_upgrade_operation =
+        RequestOperationInput::SystemUpgrade(SystemUpgradeOperationInput {
+            target: SystemUpgradeTargetDTO::UpgradeStation,
+            module: base_chunk,
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Some(station_init_arg_bytes),
+            take_backup_snapshot: None,
+        });
+
+    execute_request_with_extra_ticks(
+        env,
+        user,
+        station_id,
+        system_upgrade_operation,
+        STATION_UPGRADE_EXTRA_TICKS,
+    )
+    .unwrap();
 }

@@ -90,6 +90,8 @@ fn review() {
                 sort_by: None,
                 only_approvable: true,
                 with_evaluation_results: false,
+                deduplication_keys: None,
+                tags: None,
             })
             .await
             .unwrap();
@@ -106,6 +108,7 @@ fn review() {
                 operation_types: Some(vec![ListRequestsOperationTypeDTO::CallExternalCanister(
                     Some(canister_id),
                 )]),
+                sort_by: None,
             })
             .await
             .unwrap()

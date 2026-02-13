@@ -5,10 +5,10 @@
 [![Tests Status](https://img.shields.io/github/actions/workflow/status/dfinity/orbit/tests.yaml?logo=githubactions&logoColor=white&style=for-the-badge&label=tests)](./actions/workflows/tests.yaml)
 
 <div style="display:flex;flex-direction:column;">
-  <img src="./docs/orbit-header.png" alt="Orbit logo" role="presentation"/><br />
+  <img src="docs/old/orbit-header.png" alt="Orbit logo" role="presentation"/><br />
 </div>
 
-Check out the [Orbit Wallet](https://orbitwallet.io) to see the platform in action.
+Check out the [Orbit Wallet](https://orbit.global) to see the platform in action.
 
 ## Overview
 
@@ -20,7 +20,7 @@ Our vision with Orbit is to emulate the transformation that Cloud providers brou
 
 ## User facing applications
 
-The [orbitwallet.io](https://orbitwallet.io) is the main entry point for users to interact with the Orbit platform. It provides access to the Orbit Wallet application, which is a dapp that allows users to manage their digital assets tailored for multi-approval scenarios. The wallet supports user management, transaction history, permissions management, and other features that are essential for managing digital assets in a secure and user-friendly way.
+The [orbit.global](https://orbit.global) is the main entry point for users to interact with the Orbit platform. It provides access to the Orbit Wallet application, which is a dapp that allows users to manage their digital assets tailored for multi-approval scenarios. The wallet supports user management, transaction history, permissions management, and other features that are essential for managing digital assets in a secure and user-friendly way.
 
 ## System Overview
 
@@ -41,7 +41,7 @@ Orbit is composed of several components, each with its own role and responsibili
 - **Station**: A station is the core canister component of Orbit. It is a trustless multi-custody canister that allows users to manage their digital assets and operations.
 - **Upgrader**: The upgrader is responsible for managing the lifecycle of the station canister. It allows for seamless and secure upgrades of the station canister.
 
-For detailed information on orbit components and terminology, please refer to the [Orbit Glossary](./docs/GLOSSARY.md).
+For detailed information on orbit components and terminology, please refer to the [Orbit Glossary](docs/old/GLOSSARY.md).
 
 ## Target Architecture
 
@@ -90,6 +90,16 @@ Please make sure you have the following installed:
 ### Building the Code
 
 Start a local replica listening on port 4943:
+
+```
+dfx start --clean --pocketic --host 127.0.0.1:4943
+```
+
+Note that the local replica should be stopped using `dfx stop` rather than by CTRL^C.
+
+If you want to resume your local replica after `dfx stop`, then you need to install the Python package `cbor2`,
+have the binary `crc32` to compute CRC32 checksums on your executable path,
+and use the following command for the first time:
 
 ```
 dfx start --clean --host 127.0.0.1:4943

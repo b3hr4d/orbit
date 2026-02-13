@@ -1,13 +1,15 @@
 import { Ref, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { AccountSetupWizardModel } from '~/components/accounts/wizard/AccountSetupWizard.vue';
+import {
+  AccountSetupWizardModel,
+  CurrentAccountSetupWizardModel,
+} from '~/components/accounts/wizard/AccountSetupWizard.vue';
 import { DateRangeModel } from '~/components/inputs/DateRange.vue';
 import logger from '~/core/logger.core';
 import { UUID } from '~/generated/station/station.did';
 import { useAppStore } from '~/stores/app.store';
 import { useStationStore } from '~/stores/station.store';
-import { BlockchainStandard, BlockchainType, TokenSymbol } from '~/types/chain.types';
 import { parseDate } from '~/utils/date.utils';
 
 export type Filters = {
@@ -84,9 +86,7 @@ export const useDefaultAccountSetupWizardModel = ({
 } = {}): AccountSetupWizardModel => {
   return {
     configuration: {
-      blockchain: BlockchainType.InternetComputer,
-      standard: BlockchainStandard.Native,
-      symbol: TokenSymbol.ICP,
+      assets: [],
     },
     permission: {
       read: {
@@ -111,7 +111,7 @@ export const useDefaultAccountSetupWizardModel = ({
 
 export const useLoadAccountSetupWizardModel = async (
   accountId: UUID,
-): Promise<AccountSetupWizardModel> => {
+): Promise<CurrentAccountSetupWizardModel> => {
   const station = useStationStore();
 
   // load the individual account details and permissions in parallel
@@ -147,10 +147,8 @@ export const useLoadAccountSetupWizardModel = async (
     configuration: {
       id: account.id,
       name: account.name,
-      blockchain: account.blockchain,
       lastModified: account.last_modification_timestamp,
-      standard: account.standard,
-      symbol: account.symbol,
+      assets: account.assets.map(accountAsset => accountAsset.asset_id),
     },
     permission: {
       read,

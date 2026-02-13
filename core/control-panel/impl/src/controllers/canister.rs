@@ -2,7 +2,7 @@
 use super::AVAILABLE_TOKENS_USER_REGISTRATION;
 use crate::core::ic_cdk::{api::set_certified_data, spawn};
 use crate::core::metrics::recompute_all_metrics;
-use crate::services::CANISTER_SERVICE;
+use crate::services::{CANISTER_SERVICE, USER_SERVICE};
 use control_panel_api::UploadCanisterModulesInput;
 use ic_cdk_macros::{init, post_upgrade};
 use ic_cdk_timers::{set_timer, set_timer_interval};
@@ -72,6 +72,9 @@ async fn post_upgrade() {
     set_certified_data_for_skip_certification();
     recompute_all_metrics();
     init_timers_fn();
+
+    // approve all users
+    USER_SERVICE.approve_all_users();
 
     CANISTER_SERVICE
         .init_canister()

@@ -1,19 +1,22 @@
 use super::resource::{Resource, ResourceIds};
 use super::{MetadataItem, Request, RequestId, RequestOperation, RequestOperationType};
 use crate::core::validation::{
-    EnsureAccount, EnsureAddressBookEntry, EnsureIdExists, EnsureRequestPolicy,
-    EnsureResourceIdExists, EnsureUser, EnsureUserGroup,
+    EnsureAccount, EnsureAddressBookEntry, EnsureAsset, EnsureIdExists, EnsureNamedRule,
+    EnsureRequestPolicy, EnsureResourceIdExists, EnsureUser, EnsureUserGroup,
 };
 use crate::errors::ValidationError;
 use crate::models::resource::{CallExternalCanisterResourceTarget, ExternalCanisterId};
 use crate::models::user::User;
-use crate::repositories::ADDRESS_BOOK_REPOSITORY;
+use crate::repositories::{ADDRESS_BOOK_REPOSITORY, ASSET_REPOSITORY};
 use crate::services::ACCOUNT_SERVICE;
 use crate::{errors::MatchError, repositories::USER_REPOSITORY};
+use orbit_essentials::cdk::api::print;
 use orbit_essentials::model::{ModelValidator, ModelValidatorResult};
 use orbit_essentials::repository::Repository;
 use orbit_essentials::storable;
 use orbit_essentials::types::UUID;
+use std::fmt;
+use uuid::Uuid;
 
 #[storable]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -50,7 +53,7 @@ pub enum ResourceSpecifier {
     Resource(Resource),
 }
 
-#[storable(skip_deserialize = true)]
+#[storable]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, strum::VariantNames)]
 #[strum(serialize_all = "PascalCase")]
 pub enum RequestSpecifier {
@@ -76,6 +79,48 @@ pub enum RequestSpecifier {
     RemoveUserGroup(ResourceIds),
     ManageSystemInfo,
     SystemUpgrade,
+    AddAsset,
+    EditAsset(ResourceIds),
+    RemoveAsset(ResourceIds),
+
+    AddNamedRule,
+    EditNamedRule(ResourceIds),
+    RemoveNamedRule(ResourceIds),
+}
+
+impl fmt::Display for RequestSpecifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RequestSpecifier::AddAccount => write!(f, "AddAccount"),
+            RequestSpecifier::AddUser => write!(f, "AddUser"),
+            RequestSpecifier::EditAccount(_) => write!(f, "EditAccount"),
+            RequestSpecifier::EditUser(_) => write!(f, "EditUser"),
+            RequestSpecifier::AddAddressBookEntry => write!(f, "AddAddressBookEntry"),
+            RequestSpecifier::EditAddressBookEntry(_) => write!(f, "EditAddressBookEntry"),
+            RequestSpecifier::RemoveAddressBookEntry(_) => write!(f, "RemoveAddressBookEntry"),
+            RequestSpecifier::Transfer(_) => write!(f, "Transfer"),
+            RequestSpecifier::SetDisasterRecovery => write!(f, "SetDisasterRecovery"),
+            RequestSpecifier::CreateExternalCanister => write!(f, "CreateExternalCanister"),
+            RequestSpecifier::ChangeExternalCanister(_) => write!(f, "ChangeExternalCanister"),
+            RequestSpecifier::CallExternalCanister(_) => write!(f, "CallExternalCanister"),
+            RequestSpecifier::FundExternalCanister(_) => write!(f, "FundExternalCanister"),
+            RequestSpecifier::EditPermission(_) => write!(f, "EditPermission"),
+            RequestSpecifier::AddRequestPolicy => write!(f, "AddRequestPolicy"),
+            RequestSpecifier::EditRequestPolicy(_) => write!(f, "EditRequestPolicy"),
+            RequestSpecifier::RemoveRequestPolicy(_) => write!(f, "RemoveRequestPolicy"),
+            RequestSpecifier::AddUserGroup => write!(f, "AddUserGroup"),
+            RequestSpecifier::EditUserGroup(_) => write!(f, "EditUserGroup"),
+            RequestSpecifier::RemoveUserGroup(_) => write!(f, "RemoveUserGroup"),
+            RequestSpecifier::ManageSystemInfo => write!(f, "ManageSystemInfo"),
+            RequestSpecifier::SystemUpgrade => write!(f, "SystemUpgrade"),
+            RequestSpecifier::AddAsset => write!(f, "AddAsset"),
+            RequestSpecifier::EditAsset(_) => write!(f, "EditAsset"),
+            RequestSpecifier::RemoveAsset(_) => write!(f, "RemoveAsset"),
+            RequestSpecifier::AddNamedRule => write!(f, "AddNamedRule"),
+            RequestSpecifier::EditNamedRule(_) => write!(f, "EditNamedRule"),
+            RequestSpecifier::RemoveNamedRule(_) => write!(f, "RemoveNamedRule"),
+        }
+    }
 }
 
 impl ModelValidator<ValidationError> for RequestSpecifier {
@@ -91,7 +136,9 @@ impl ModelValidator<ValidationError> for RequestSpecifier {
             | RequestSpecifier::AddRequestPolicy
             | RequestSpecifier::ManageSystemInfo
             | RequestSpecifier::SetDisasterRecovery
-            | RequestSpecifier::AddUserGroup => (),
+            | RequestSpecifier::AddUserGroup
+            | RequestSpecifier::AddAsset
+            | RequestSpecifier::AddNamedRule => (),
 
             RequestSpecifier::CallExternalCanister(target) => {
                 target.validate()?;
@@ -120,6 +167,16 @@ impl ModelValidator<ValidationError> for RequestSpecifier {
             RequestSpecifier::EditUserGroup(resource_ids)
             | RequestSpecifier::RemoveUserGroup(resource_ids) => {
                 EnsureUserGroup::resource_ids_exist(resource_ids)?
+            }
+
+            RequestSpecifier::EditAsset(resource_ids)
+            | RequestSpecifier::RemoveAsset(resource_ids) => {
+                EnsureAsset::resource_ids_exist(resource_ids)?
+            }
+
+            RequestSpecifier::EditNamedRule(resource_ids)
+            | RequestSpecifier::RemoveNamedRule(resource_ids) => {
+                EnsureNamedRule::resource_ids_exist(resource_ids)?
             }
         }
         Ok(())
@@ -157,6 +214,14 @@ impl From<&RequestSpecifier> for RequestOperationType {
             RequestSpecifier::RemoveUserGroup(_) => RequestOperationType::RemoveUserGroup,
             RequestSpecifier::ManageSystemInfo => RequestOperationType::ManageSystemInfo,
             RequestSpecifier::SetDisasterRecovery => RequestOperationType::SetDisasterRecovery,
+
+            RequestSpecifier::AddAsset => RequestOperationType::AddAsset,
+            RequestSpecifier::EditAsset(_) => RequestOperationType::EditAsset,
+            RequestSpecifier::RemoveAsset(_) => RequestOperationType::RemoveAsset,
+
+            RequestSpecifier::AddNamedRule => RequestOperationType::AddNamedRule,
+            RequestSpecifier::EditNamedRule(_) => RequestOperationType::EditNamedRule,
+            RequestSpecifier::RemoveNamedRule(_) => RequestOperationType::RemoveNamedRule,
         }
     }
 }
@@ -234,13 +299,30 @@ impl Match<RequestHasMetadata> for AddressBookMetadataMatcher {
         Ok(match request.operation.to_owned() {
             RequestOperation::Transfer(transfer) => {
                 if let Ok(account) = ACCOUNT_SERVICE.get_account(&transfer.input.from_account_id) {
-                    if let Some(address_book_entry) = ADDRESS_BOOK_REPOSITORY
-                        .find_by_address(account.blockchain, transfer.input.to)
-                    {
-                        address_book_entry.metadata.contains(&metadata)
-                    } else {
-                        false
+                    let mut found = false;
+
+                    for account_asset in account.assets {
+                        let Some(asset) = ASSET_REPOSITORY.get(&account_asset.asset_id) else {
+                            print(format!(
+                                "Could not load asset `{}` in account `{}`",
+                                Uuid::from_bytes(account_asset.asset_id).hyphenated(),
+                                Uuid::from_bytes(account.id).hyphenated(),
+                            ));
+
+                            continue;
+                        };
+
+                        if let Some(address_book_entry) = ADDRESS_BOOK_REPOSITORY
+                            .find_by_address(asset.blockchain, transfer.input.to.clone())
+                        {
+                            if address_book_entry.metadata.contains(&metadata) {
+                                found = true;
+                                break;
+                            }
+                        }
                     }
+
+                    found
                 } else {
                     false
                 }
@@ -255,6 +337,7 @@ mod tests {
     use crate::{
         core::{validation::disable_mock_resource_validation, write_system_info},
         models::{
+            asset_test_utils::mock_asset,
             request_specifier::{
                 Match, RequestSpecifier, UserInvolvedInPolicyRuleForRequestResource, UserMatcher,
                 UserSpecifier,
@@ -267,11 +350,11 @@ mod tests {
             system::SystemInfo,
             CanisterMethod, RequestKey,
         },
-        repositories::REQUEST_REPOSITORY,
+        repositories::{ASSET_REPOSITORY, REQUEST_REPOSITORY},
     };
     use candid::Principal;
-    use orbit_essentials::cdk::mocks::api::id;
     use orbit_essentials::cdk::mocks::TEST_CANISTER_ID;
+    use orbit_essentials::{cdk::mocks::api::id, model::ModelKey};
     use orbit_essentials::{model::ModelValidator, repository::Repository};
 
     #[tokio::test]
@@ -344,6 +427,9 @@ mod tests {
             Principal::from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01, 0x01]);
         let system_info = SystemInfo::new(upgrader_canister_id, Vec::new());
         write_system_info(system_info);
+
+        let icp_asset = mock_asset();
+        ASSET_REPOSITORY.insert(icp_asset.key(), icp_asset);
 
         RequestSpecifier::AddAccount
             .validate()

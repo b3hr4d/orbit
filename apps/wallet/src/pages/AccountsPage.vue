@@ -42,6 +42,7 @@
             :items="accounts"
             :items-per-page="-1"
             :hover="true"
+            data-test-id="accounts-table"
             @click:row="
               (_: unknown, { item }: any) => {
                 $router.push({ name: Routes.Account, params: { id: item.id } });
@@ -56,21 +57,16 @@
                 {{ column.title }}
               </div>
             </template>
-            <template #item.balance="{ item: account }">
-              <div class="d-flex justify-end align-center text-no-wrap">
-                {{
-                  account.balance?.[0]
-                    ? `${formatBalance(account.balance[0].balance, account.balance[0].decimals)} ${
-                        account.symbol
-                      }`
-                    : '-'
-                }}
+
+            <template #item.symbol="{ item: account }">
+              <div class="d-flex align-center text-no-wrap">
+                <AccountAssetsCell :asset-ids="account.assets.map(a => a.asset_id)" />
               </div>
             </template>
             <template #item.name="{ item: account }">
               {{ account.name }}
 
-              <VTooltip v-if="account.id == sourceCylceAccount" location="bottom">
+              <VTooltip v-if="account.id == sourceCycleAccount" location="bottom">
                 <template #activator="{ props: tooltipProps }">
                   <VIcon :icon="mdiCashSync" class="ml-2 pb-1" v-bind="tooltipProps"></VIcon>
                 </template>
@@ -78,22 +74,6 @@
               </VTooltip>
             </template>
 
-            <template #item.address="{ item: account }">
-              <div class="d-flex align-center flex-no-wrap">
-                <TextOverflow :max-length="app.isMobile ? 16 : 32" :text="account.address" />
-                <VBtn
-                  size="x-small"
-                  variant="text"
-                  :icon="mdiContentCopy"
-                  @click.stop="
-                    copyToClipboard({
-                      textToCopy: account.address,
-                      sendNotification: true,
-                    })
-                  "
-                />
-              </div>
-            </template>
             <template #item.actions>
               <div class="d-flex justify-end">
                 <VIcon :icon="mdiChevronRight" size="large" />
@@ -115,14 +95,14 @@
 </template>
 
 <script lang="ts" setup>
-import { mdiCashSync, mdiChevronRight, mdiContentCopy } from '@mdi/js';
+import { mdiCashSync, mdiChevronRight } from '@mdi/js';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { VBtn, VDataTable, VIcon, VPagination } from 'vuetify/components';
+import { VDataTable, VIcon, VPagination } from 'vuetify/components';
 import AuthCheck from '~/components/AuthCheck.vue';
 import DataLoader from '~/components/DataLoader.vue';
 import PageLayout from '~/components/PageLayout.vue';
-import TextOverflow from '~/components/TextOverflow.vue';
+import AccountAssetsCell from '~/components/accounts/AccountAssetsCell.vue';
 import AccountSetupAction from '~/components/accounts/AccountSetupAction.vue';
 import PageBody from '~/components/layouts/PageBody.vue';
 import PageHeader from '~/components/layouts/PageHeader.vue';
@@ -136,9 +116,8 @@ import { useStationStore } from '~/stores/station.store';
 import type { PageProps, TableHeader } from '~/types/app.types';
 import { Privilege } from '~/types/auth.types';
 import { RequestDomains } from '~/types/station.types';
-import { copyToClipboard } from '~/utils/app.utils';
 import { hasRequiredPrivilege } from '~/utils/auth.utils';
-import { formatBalance, throttle, unreachable, variantIs } from '~/utils/helper.utils';
+import { throttle, unreachable, variantIs } from '~/utils/helper.utils';
 
 const props = withDefaults(defineProps<PageProps>(), { title: undefined, breadcrumbs: () => [] });
 const i18n = useI18n();
@@ -152,7 +131,6 @@ const headers = computed<TableHeader[]>(() => {
     return [
       { title: i18n.t('terms.name'), key: 'name', sortable: false },
       { title: i18n.t('terms.token'), key: 'symbol', sortable: false },
-      { title: i18n.t('terms.balance'), key: 'balance', sortable: false },
       { title: '', key: 'actions', sortable: false, headerProps: { class: 'w-0' } },
     ];
   }
@@ -160,13 +138,11 @@ const headers = computed<TableHeader[]>(() => {
   return [
     { title: i18n.t('terms.name'), key: 'name', sortable: false },
     { title: i18n.t('terms.token'), key: 'symbol', sortable: false },
-    { title: i18n.t('terms.address'), key: 'address', sortable: false },
-    { title: i18n.t('terms.balance'), key: 'balance', sortable: false },
     { title: '', key: 'actions', sortable: false, headerProps: { class: 'w-0' } },
   ];
 });
 
-const sourceCylceAccount = ref<UUID | undefined>();
+const sourceCycleAccount = ref<UUID | undefined>();
 
 let useVerifiedCall = false;
 const triggerSearch = throttle(() => (forceReload.value = true), 500);
@@ -199,7 +175,10 @@ onMounted(async () => {
       const systemInfo = (await station.service.systemInfo()).system;
 
       if (variantIs(systemInfo.cycle_obtain_strategy, 'MintFromNativeToken')) {
-        sourceCylceAccount.value = systemInfo.cycle_obtain_strategy.MintFromNativeToken.account_id;
+        sourceCycleAccount.value = systemInfo.cycle_obtain_strategy.MintFromNativeToken.account_id;
+      } else if (variantIs(systemInfo.cycle_obtain_strategy, 'WithdrawFromCyclesLedger')) {
+        sourceCycleAccount.value =
+          systemInfo.cycle_obtain_strategy.WithdrawFromCyclesLedger.account_id;
       } else if (variantIs(systemInfo.cycle_obtain_strategy, 'Disabled')) {
         // do nothing
       } else {

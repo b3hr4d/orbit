@@ -1,3 +1,107 @@
+## 0.2.0 (2025-06-02)
+
+
+### 🚀 Features
+
+- **station:** external canister snapshots ([#429](https://github.com/dfinity/orbit/pull/429))
+
+- **station:** monitor external canisters ([#416](https://github.com/dfinity/orbit/pull/416))
+
+- **station:** enable station top up from the cycles ledger balance ([#472](https://github.com/dfinity/orbit/pull/472))
+
+- **docs:** docs portal ([#486](https://github.com/dfinity/orbit/pull/486))
+
+- **apps:** init marketing project ([#498](https://github.com/dfinity/orbit/pull/498))
+
+- **wallet:** updated branding ([#497](https://github.com/dfinity/orbit/pull/497))
+
+- **marketing:** marketing site home page ([#500](https://github.com/dfinity/orbit/pull/500))
+
+- **docs:** initial docs portal ([#493](https://github.com/dfinity/orbit/pull/493))
+
+- **upgrader:** disaster recovery via canister snapshots ([#542](https://github.com/dfinity/orbit/pull/542))
+
+- **station:** configurable station initialization ([#482](https://github.com/dfinity/orbit/pull/482))
+
+- **upgrader:** new endpoint to list station snapshots ([#545](https://github.com/dfinity/orbit/pull/545))
+
+- **station:** update Request::last_modification_timestamp on adding approval ([#576](https://github.com/dfinity/orbit/pull/576))
+
+- **wallet:** DR UI ([#557](https://github.com/dfinity/orbit/pull/557))
+
+
+### 🩹 Fixes
+
+- **wallet:** update lockfile ([#459](https://github.com/dfinity/orbit/pull/459))
+
+- **ci:** install CMC in Orbit local deployment ([#465](https://github.com/dfinity/orbit/pull/465))
+
+- **ci:** build and CI issues ([#467](https://github.com/dfinity/orbit/pull/467))
+
+- **station:** docker build ([#492](https://github.com/dfinity/orbit/pull/492))
+
+- **station:** security issue 42 ([#505](https://github.com/dfinity/orbit/pull/505))
+
+- **wallet:** security issue 36, 37, 38, 39, 40, 41 ([#503](https://github.com/dfinity/orbit/pull/503))
+
+- **station:** security issue 19, 54 ([#509](https://github.com/dfinity/orbit/pull/509))
+
+- **station:** security issue 45 ([#510](https://github.com/dfinity/orbit/pull/510))
+
+- **ci:** update docker setup in release script ([#517](https://github.com/dfinity/orbit/pull/517))
+
+- **CI:** use rustup 1.27.1 for docker build ([#532](https://github.com/dfinity/orbit/pull/532))
+
+- **station:** bump ic-cdk to fix canister_status parsing ([#538](https://github.com/dfinity/orbit/pull/538))
+
+
+### 🧱 Updated Dependencies
+
+- Updated station-api to 0.5.0
+
+
+### ❤️  Thank You
+
+- Jan Hrubes @jedna
+- Kepler Vital
+- mraszyk @mraszyk
+- olaszakos
+
+## 0.1.0 (2024-11-27)
+
+
+### 🚀 Features
+
+- **dfx-orbit:** Review list pagination ([#403](https://github.com/dfinity/orbit/pull/403))
+
+- **wallet:** use didc for candid parsing ([#402](https://github.com/dfinity/orbit/pull/402))
+
+- **station:** add expiration dt during request creation ([#424](https://github.com/dfinity/orbit/pull/424))
+
+- ⚠️  **station:** multi chain support ([#374](https://github.com/dfinity/orbit/pull/374))
+
+
+### 🩹 Fixes
+
+- **control-panel:** fix initial station deploy ([#441](https://github.com/dfinity/orbit/pull/441))
+
+
+### ⚠️  Breaking Changes
+
+- ⚠️  **station:** multi chain support ([#374](https://github.com/dfinity/orbit/pull/374))
+
+### 🧱 Updated Dependencies
+
+- Updated orbit-essentials to 0.1.0
+- Updated station-api to 0.1.0
+
+
+### ❤️  Thank You
+
+- Kepler Vital
+- Leon Tan
+- olaszakos
+
 ## 0.0.2-alpha.6 (2024-10-22)
 
 

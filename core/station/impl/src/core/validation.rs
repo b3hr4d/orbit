@@ -5,24 +5,21 @@ use std::cell::RefCell;
 
 use crate::{
     errors::{ExternalCanisterValidationError, RecordValidationError},
-    factories::blockchains::InternetComputer,
     models::{
         resource::{Resource, ResourceId, ResourceIds},
-        AccountKey, AddressBookEntryKey, NotificationKey, RequestKey, UserKey,
+        AccountKey, AddressBookEntryKey, NamedRuleKey, NotificationKey, RequestKey, TokenStandard,
+        UserKey,
     },
     repositories::{
         permission::PERMISSION_REPOSITORY, request_policy::REQUEST_POLICY_REPOSITORY,
-        ACCOUNT_REPOSITORY, ADDRESS_BOOK_REPOSITORY, NOTIFICATION_REPOSITORY, REQUEST_REPOSITORY,
-        USER_GROUP_REPOSITORY, USER_REPOSITORY,
+        ACCOUNT_REPOSITORY, ADDRESS_BOOK_REPOSITORY, ASSET_REPOSITORY, NAMED_RULE_REPOSITORY,
+        NOTIFICATION_REPOSITORY, REQUEST_REPOSITORY, USER_GROUP_REPOSITORY, USER_REPOSITORY,
     },
     services::SYSTEM_SERVICE,
 };
 use candid::Principal;
 use ic_stable_structures::{Memory, Storable};
-#[cfg(not(test))]
-pub use orbit_essentials::cdk as ic_cdk;
-#[cfg(test)]
-pub use orbit_essentials::cdk::mocks as ic_cdk;
+
 use orbit_essentials::repository::Repository;
 use orbit_essentials::types::UUID;
 use uuid::Uuid;
@@ -195,15 +192,27 @@ impl EnsureIdExists<Resource> for EnsurePermission {
 pub struct EnsureExternalCanister {}
 
 impl EnsureExternalCanister {
-    // The management canister, the orbit station, and the upgrader are NOT external canisters.
-    pub fn is_external_canister(
+    // Known ledger canisters, the management canister, the orbit station, and the upgrader are NOT external canisters.
+    pub fn is_external_canister(principal: Principal) -> bool {
+        // Check if the target canister is a ledger canister of an asset.
+        let principal_str = principal.to_text();
+        let is_ledger_canister_id = ASSET_REPOSITORY.list().iter().any(|asset| {
+            asset
+                .metadata
+                .get(TokenStandard::METADATA_KEY_LEDGER_CANISTER_ID)
+                .is_some_and(|canister_id| canister_id == principal_str)
+        });
+
+        !(is_ledger_canister_id
+            || principal == Principal::management_canister()
+            || principal == crate::core::ic_cdk::api::id()
+            || principal == SYSTEM_SERVICE.get_upgrader_canister_id())
+    }
+
+    pub fn ensure_external_canister(
         principal: Principal,
     ) -> Result<(), ExternalCanisterValidationError> {
-        if principal == Principal::management_canister()
-            || principal == ic_cdk::api::id()
-            || principal == InternetComputer::ledger_canister_id()
-            || principal == SYSTEM_SERVICE.get_upgrader_canister_id()
-        {
+        if !Self::is_external_canister(principal) {
             return Err(ExternalCanisterValidationError::InvalidExternalCanister { principal });
         }
 
@@ -227,3 +236,79 @@ impl EnsureIdExists<UUID> for EnsureNotification {
 }
 
 impl EnsureResourceIdExists for EnsureNotification {}
+
+pub struct EnsureAsset {}
+
+impl EnsureIdExists<UUID> for EnsureAsset {
+    fn id_exists(id: &UUID) -> Result<(), RecordValidationError> {
+        ensure_entry_exists(ASSET_REPOSITORY.to_owned(), *id).ok_or(
+            RecordValidationError::NotFound {
+                model_name: "Asset".to_string(),
+                id: Uuid::from_bytes(*id).hyphenated().to_string(),
+            },
+        )
+    }
+}
+
+impl EnsureResourceIdExists for EnsureAsset {}
+
+pub struct EnsureNamedRule {}
+
+impl EnsureIdExists<UUID> for EnsureNamedRule {
+    fn id_exists(id: &UUID) -> Result<(), RecordValidationError> {
+        ensure_entry_exists(NAMED_RULE_REPOSITORY.to_owned(), NamedRuleKey { id: *id }).ok_or(
+            RecordValidationError::NotFound {
+                model_name: "NamedRule".to_string(),
+                id: Uuid::from_bytes(*id).hyphenated().to_string(),
+            },
+        )
+    }
+}
+
+impl EnsureResourceIdExists for EnsureNamedRule {}
+
+#[cfg(test)]
+mod test {
+    use std::collections::BTreeMap;
+
+    use candid::Principal;
+    use orbit_essentials::{model::ModelKey, repository::Repository};
+
+    use crate::{
+        core::test_utils::init_canister_system,
+        models::{asset_test_utils::mock_asset, TokenStandard},
+        repositories::ASSET_REPOSITORY,
+    };
+
+    use super::EnsureExternalCanister;
+
+    #[test]
+    fn test_is_external_canister() {
+        init_canister_system();
+
+        let principal = Principal::from_slice(&[1; 29]);
+
+        let is_external_canister = EnsureExternalCanister::is_external_canister(principal);
+        assert!(is_external_canister);
+        let ensure_external_canister = EnsureExternalCanister::ensure_external_canister(principal);
+        assert!(ensure_external_canister.is_ok());
+
+        let mut asset = mock_asset();
+
+        asset
+            .metadata
+            .change(crate::models::ChangeMetadata::OverrideSpecifiedBy(
+                BTreeMap::from([(
+                    TokenStandard::METADATA_KEY_LEDGER_CANISTER_ID.to_string(),
+                    principal.to_text(),
+                )]),
+            ));
+
+        ASSET_REPOSITORY.insert(asset.key(), asset);
+
+        let is_external_canister = EnsureExternalCanister::is_external_canister(principal);
+        assert!(!is_external_canister);
+        let ensure_external_canister = EnsureExternalCanister::ensure_external_canister(principal);
+        assert!(ensure_external_canister.is_err());
+    }
+}

@@ -80,14 +80,23 @@ impl AddressBookService {
         input: ListAddressBookEntriesInput,
         paginate: Option<PaginationInput>,
     ) -> ServiceResult<PaginatedData<AddressBookEntry>> {
-        let entries = self
+        let mut entries = self
             .address_book_repository
             .find_where(AddressBookWhereClause {
                 ids: input.ids,
                 addresses: input.addresses,
                 blockchain: input.blockchain,
                 labels: input.labels,
+                address_formats: input.address_formats,
             });
+
+        if let Some(search_term) = input.search_term {
+            let search_term = search_term.to_lowercase();
+            entries.retain(|entry| {
+                entry.address_owner.to_lowercase().contains(&search_term)
+                    || entry.address.to_lowercase().contains(&search_term)
+            });
+        }
 
         Ok(paginated_items(PaginatedItemsArgs {
             offset: paginate.to_owned().and_then(|p| p.offset),
@@ -134,7 +143,7 @@ impl AddressBookService {
         let mut entry = self.get_entry_by_id(&input.address_book_entry_id)?;
 
         if let Some(address_owner) = &input.address_owner {
-            entry.address_owner = address_owner.to_owned();
+            address_owner.clone_into(&mut entry.address_owner);
         }
 
         if let Some(change_metadata) = input.change_metadata {
@@ -169,7 +178,8 @@ mod tests {
         core::test_utils,
         models::{
             address_book_entry_test_utils::mock_address_book_entry, AddAddressBookEntryOperation,
-            AddAddressBookEntryOperationInput, Blockchain, ChangeMetadata, Metadata, MetadataItem,
+            AddAddressBookEntryOperationInput, AddressFormat, Blockchain, ChangeMetadata, Metadata,
+            MetadataItem,
         },
     };
     use station_api::MetadataDTO;
@@ -201,6 +211,7 @@ mod tests {
                 blockchain: Blockchain::InternetComputer,
                 metadata: address_book_entry.metadata.clone().into(),
                 labels: vec![],
+                address_format: AddressFormat::ICPAccountIdentifier,
             },
         };
 

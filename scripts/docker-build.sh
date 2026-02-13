@@ -23,6 +23,8 @@ Options:
   --station builds the station canister
   --upgrader builds the upgrader canister
   --wallet-dapp builds the wallet frontend assets
+  --marketing-dapp builds the marketing frontend assets
+  --docs-portal builds the docs frontend assets
 
   -h, --help prints this help message
 EOF
@@ -55,8 +57,7 @@ function deterministic_build() {
   local target=$2
 
   # Build the canister
-  docker build --build-arg BUILD_MODE=$BUILD_MODE -t orbit-$project_name --target $target .
-   
+  docker build --build-arg BUILD_MODE=$BUILD_MODE -t orbit-$project_name --target $target . --platform=linux/amd64
 
   # Create a container to extract the generated artifacts
   docker create --name orbit-$project_name-container orbit-$project_name
@@ -90,6 +91,14 @@ function build_upgrader() {
 
 function build_wallet_dapp() {
   deterministic_build wallet-dapp build_wallet_dapp
+}
+
+function build_marketing_dapp() {
+  deterministic_build marketing-dapp build_marketing_dapp
+}
+
+function build_docs_portal() {
+  deterministic_build docs-portal build_docs_portal
 }
 
 #############################################
@@ -128,6 +137,16 @@ while [[ $# -gt 0 ]]; do
   --wallet-dapp)
     shift
     exec_function build_wallet_dapp
+    echo
+    ;;
+  --marketing-dapp)
+    shift
+    exec_function build_marketing_dapp
+    echo
+    ;;
+  --docs-portal)
+    shift
+    exec_function build_docs_portal
     echo
     ;;
   *)

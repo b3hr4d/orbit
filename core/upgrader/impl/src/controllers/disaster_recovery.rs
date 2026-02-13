@@ -1,17 +1,14 @@
 use std::sync::Arc;
 
-use candid::Principal;
-use ic_cdk::{query, update};
-use lazy_static::lazy_static;
-use orbit_essentials::{
-    api::ApiResult,
-    cdk::{api::is_controller, caller},
-};
-
+use crate::upgrader_ic_cdk::{api::is_controller, caller};
 use crate::{
     errors::UpgraderApiError,
     services::{DisasterRecoveryService, DISASTER_RECOVERY_SERVICE},
 };
+use candid::Principal;
+use ic_cdk::{query, update};
+use lazy_static::lazy_static;
+use orbit_essentials::api::ApiResult;
 
 // Controller initialization and implementation.
 lazy_static! {
@@ -35,6 +32,13 @@ fn set_disaster_recovery_accounts(
 }
 
 #[update]
+fn set_disaster_recovery_accounts_and_assets(
+    input: upgrader_api::SetDisasterRecoveryAccountsAndAssetsInput,
+) -> ApiResult {
+    CONTROLLER.set_disaster_recovery_accounts_and_assets(input)
+}
+
+#[update]
 fn request_disaster_recovery(input: upgrader_api::RequestDisasterRecoveryInput) -> ApiResult {
     CONTROLLER.request_disaster_recovery(input)
 }
@@ -51,6 +55,12 @@ fn get_disaster_recovery_accounts() -> ApiResult<upgrader_api::GetDisasterRecove
 }
 
 #[query]
+fn get_disaster_recovery_accounts_and_assets(
+) -> ApiResult<upgrader_api::GetDisasterRecoveryAccountsAndAssetsResponse> {
+    CONTROLLER.get_disaster_recovery_accounts_and_assets()
+}
+
+#[query]
 fn get_disaster_recovery_committee() -> ApiResult<upgrader_api::GetDisasterRecoveryCommitteeResponse>
 {
     CONTROLLER.get_disaster_recovery_committee()
@@ -59,6 +69,11 @@ fn get_disaster_recovery_committee() -> ApiResult<upgrader_api::GetDisasterRecov
 #[query]
 fn get_disaster_recovery_state() -> ApiResult<upgrader_api::GetDisasterRecoveryStateResponse> {
     CONTROLLER.get_disaster_recovery_state()
+}
+
+#[update]
+async fn canister_snapshots() -> ApiResult<Vec<upgrader_api::Snapshot>> {
+    CONTROLLER.canister_snapshots().await
 }
 
 pub struct DisasterRecoveryController {
@@ -73,24 +88,38 @@ impl DisasterRecoveryController {
         let caller = caller();
         if !is_controller(&caller) {
             Err(UpgraderApiError::NotController)?
-        } else {
-            self.disaster_recovery_service
-                .set_committee(input.committee.into())
         }
+
+        self.disaster_recovery_service
+            .set_committee(input.committee.into())
     }
 
     fn set_disaster_recovery_accounts(
         &self,
-
         input: upgrader_api::SetDisasterRecoveryAccountsInput,
     ) -> ApiResult {
         let caller = caller();
         if !is_controller(&caller) {
             Err(UpgraderApiError::NotController)?
-        } else {
-            self.disaster_recovery_service
-                .set_accounts(input.accounts.into_iter().map(Into::into).collect())
         }
+
+        self.disaster_recovery_service
+            .set_accounts(input.accounts.into_iter().map(Into::into).collect())
+    }
+
+    fn set_disaster_recovery_accounts_and_assets(
+        &self,
+        input: upgrader_api::SetDisasterRecoveryAccountsAndAssetsInput,
+    ) -> ApiResult {
+        let caller = caller();
+        if !is_controller(&caller) {
+            Err(UpgraderApiError::NotController)?
+        }
+
+        self.disaster_recovery_service.set_accounts_and_assets(
+            input.accounts.into_iter().map(Into::into).collect(),
+            input.assets.into_iter().map(Into::into).collect(),
+        )
     }
 
     fn request_disaster_recovery(
@@ -101,14 +130,13 @@ impl DisasterRecoveryController {
         let caller = caller();
         if !self.disaster_recovery_service.is_committee_member(&caller) {
             Err(UpgraderApiError::Unauthorized)?
-        } else {
-            self.disaster_recovery_service
-                .request_recovery(caller, input);
-
-            self.disaster_recovery_service.check_requests();
-
-            Ok(())
         }
+
+        self.disaster_recovery_service
+            .request_recovery(caller, input);
+        self.disaster_recovery_service.check_requests();
+
+        Ok(())
     }
 
     fn is_committee_member(&self) -> ApiResult<upgrader_api::IsCommitteeMemberResponse> {
@@ -116,55 +144,148 @@ impl DisasterRecoveryController {
 
         if caller == Principal::anonymous() {
             Err(UpgraderApiError::Unauthorized)?
-        } else {
-            Ok(upgrader_api::IsCommitteeMemberResponse {
-                is_committee_member: self.disaster_recovery_service.is_committee_member(&caller),
-            })
         }
+
+        Ok(upgrader_api::IsCommitteeMemberResponse {
+            is_committee_member: self.disaster_recovery_service.is_committee_member(&caller),
+        })
+    }
+
+    fn can_query_state(&self, caller: &Principal) -> bool {
+        is_controller(caller) || self.disaster_recovery_service.is_committee_member(caller)
     }
 
     fn get_disaster_recovery_accounts(
         &self,
     ) -> ApiResult<upgrader_api::GetDisasterRecoveryAccountsResponse> {
         let caller = caller();
+
+        if !self.can_query_state(&caller) {
+            Err(UpgraderApiError::Unauthorized)?
+        }
+
+        Ok(upgrader_api::GetDisasterRecoveryAccountsResponse {
+            accounts: self
+                .disaster_recovery_service
+                .get_accounts()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        })
+    }
+
+    fn get_disaster_recovery_accounts_and_assets(
+        &self,
+    ) -> ApiResult<upgrader_api::GetDisasterRecoveryAccountsAndAssetsResponse> {
+        let caller = caller();
         if !is_controller(&caller) {
             Err(UpgraderApiError::NotController)?
-        } else {
-            Ok(upgrader_api::GetDisasterRecoveryAccountsResponse {
-                accounts: self
-                    .disaster_recovery_service
-                    .get_accounts()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-            })
         }
+
+        Ok(upgrader_api::GetDisasterRecoveryAccountsAndAssetsResponse {
+            accounts: self
+                .disaster_recovery_service
+                .get_multi_asset_accounts()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            assets: self
+                .disaster_recovery_service
+                .get_assets()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        })
     }
 
     fn get_disaster_recovery_committee(
         &self,
     ) -> ApiResult<upgrader_api::GetDisasterRecoveryCommitteeResponse> {
         let caller = caller();
-        if !is_controller(&caller) {
-            Err(UpgraderApiError::NotController)?
-        } else {
-            Ok(upgrader_api::GetDisasterRecoveryCommitteeResponse {
-                committee: self
-                    .disaster_recovery_service
-                    .get_committee()
-                    .map(Into::into),
-            })
+        if !self.can_query_state(&caller) {
+            Err(UpgraderApiError::Unauthorized)?
         }
+
+        Ok(upgrader_api::GetDisasterRecoveryCommitteeResponse {
+            committee: self
+                .disaster_recovery_service
+                .get_committee()
+                .map(Into::into),
+        })
     }
 
     fn get_disaster_recovery_state(
         &self,
     ) -> ApiResult<upgrader_api::GetDisasterRecoveryStateResponse> {
         let caller = caller();
-        if !is_controller(&caller) {
-            Err(UpgraderApiError::NotController)?
-        } else {
-            Ok(self.disaster_recovery_service.get_state().into())
+        if !self.can_query_state(&caller) {
+            Err(UpgraderApiError::Unauthorized)?
         }
+
+        Ok(self.disaster_recovery_service.get_state().into())
+    }
+
+    async fn canister_snapshots(&self) -> ApiResult<Vec<upgrader_api::Snapshot>> {
+        let caller = caller();
+        if !self.disaster_recovery_service.is_committee_member(&caller) {
+            Err(UpgraderApiError::Unauthorized)?
+        }
+
+        self.disaster_recovery_service
+            .canister_snapshots()
+            .await
+            .map(|snapshots| snapshots.into_iter().map(|s| s.into()).collect())
+            .map_err(|err| UpgraderApiError::Unexpected(err).into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::model::tests::mock_non_committee_member;
+    use crate::upgrader_ic_cdk::set_caller;
+    use crate::{
+        model::tests::{mock_committee, mock_committee_member},
+        upgrader_ic_cdk::TEST_CONTROLLER_ID,
+    };
+    use candid::Principal;
+
+    use super::CONTROLLER;
+    use crate::services::DISASTER_RECOVERY_SERVICE;
+
+    #[test]
+    fn committee_members_and_controllers_are_authorized() {
+        let member_principal = mock_committee_member();
+
+        DISASTER_RECOVERY_SERVICE
+            .set_committee(mock_committee())
+            .expect("set committee should succeed");
+
+        assert!(CONTROLLER.can_query_state(&member_principal));
+        assert!(CONTROLLER.can_query_state(&TEST_CONTROLLER_ID));
+
+        assert!(!CONTROLLER.can_query_state(&Principal::anonymous()));
+        assert!(!CONTROLLER.can_query_state(&Principal::from_slice(&[128; 29])));
+    }
+
+    #[test]
+    fn authorized_callers_can_query_state() {
+        let member_principal = mock_committee_member();
+
+        DISASTER_RECOVERY_SERVICE
+            .set_committee(mock_committee())
+            .expect("set committee should succeed");
+
+        set_caller(member_principal);
+        assert!(CONTROLLER.get_disaster_recovery_accounts().is_ok());
+    }
+
+    #[test]
+    fn unauthorized_callers_cannot_query_state() {
+        DISASTER_RECOVERY_SERVICE
+            .set_committee(mock_committee())
+            .expect("set committee should succeed");
+
+        set_caller(mock_non_committee_member());
+        assert!(CONTROLLER.get_disaster_recovery_accounts().is_err());
     }
 }

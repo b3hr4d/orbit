@@ -1,11 +1,8 @@
 use super::{Create, Execute, RequestExecuteStage};
 use crate::{
     errors::{RequestError, RequestExecuteError},
-    models::{
-        Request, RequestExecutionPlan, RequestOperation, SystemUpgradeOperation,
-        SystemUpgradeTarget,
-    },
-    services::{DisasterRecoveryService, SystemService},
+    models::{Request, RequestOperation, SystemUpgradeOperation, SystemUpgradeTarget},
+    services::SystemService,
 };
 use async_trait::async_trait;
 use candid::Encode;
@@ -25,10 +22,10 @@ impl Create<SystemUpgradeOperationInput> for SystemUpgradeRequestCreate {
         input: CreateRequestInput,
         operation_input: SystemUpgradeOperationInput,
     ) -> Result<Request, RequestError> {
-        let request = Request::new(
+        let request = Request::from_request_creation_input(
             request_id,
             requested_by_user,
-            Request::default_expiration_dt_ns(),
+            input,
             RequestOperation::SystemUpgrade(SystemUpgradeOperation {
                 arg_checksum: operation_input.arg.as_ref().map(|arg| {
                     let mut hasher = Sha256::new();
@@ -44,14 +41,10 @@ impl Create<SystemUpgradeOperationInput> for SystemUpgradeRequestCreate {
                         hasher.finalize().to_vec()
                     }
                 },
+                take_backup_snapshot: operation_input.take_backup_snapshot,
                 input: operation_input.into(),
             }),
-            input
-                .execution_plan
-                .map(Into::into)
-                .unwrap_or(RequestExecutionPlan::Immediate),
-            input.title.unwrap_or_else(|| "ChangeCanister".to_string()),
-            input.summary,
+            "Upgrade System".to_string(),
         );
 
         Ok(request)
@@ -62,7 +55,6 @@ pub struct SystemUpgradeRequestExecute<'p, 'o> {
     request: &'p Request,
     operation: &'o SystemUpgradeOperation,
     system_service: Arc<SystemService>,
-    disaster_recovery_service: Arc<DisasterRecoveryService>,
 }
 
 impl<'p, 'o> SystemUpgradeRequestExecute<'p, 'o> {
@@ -70,13 +62,11 @@ impl<'p, 'o> SystemUpgradeRequestExecute<'p, 'o> {
         request: &'p Request,
         operation: &'o SystemUpgradeOperation,
         system_service: Arc<SystemService>,
-        disaster_recovery_service: Arc<DisasterRecoveryService>,
     ) -> Self {
         Self {
             request,
             operation,
             system_service,
-            disaster_recovery_service,
         }
     }
 }
@@ -97,6 +87,7 @@ impl Execute for SystemUpgradeRequestExecute<'_, '_> {
                         &self.operation.input.module,
                         &self.operation.input.module_extra_chunks,
                         arg,
+                        self.operation.input.take_backup_snapshot,
                     )
                     .await
                     .map_err(|err| RequestExecuteError::Failed {
@@ -120,17 +111,15 @@ impl Execute for SystemUpgradeRequestExecute<'_, '_> {
                         &self.operation.input.module,
                         &self.operation.input.module_extra_chunks,
                         self.operation.input.arg.clone(),
+                        self.operation
+                            .input
+                            .take_backup_snapshot
+                            .unwrap_or_default(),
                     )
                     .await
                     .map_err(|err| RequestExecuteError::Failed {
                         reason: format!("failed to upgrade upgrader: {} ({:?})", err, err.details),
                     })?;
-
-                // The upgrader might have just gained the ability to perform disaster recovery, so sync it now.
-                let disaster_recovery_service = Arc::clone(&self.disaster_recovery_service);
-                crate::core::ic_cdk::spawn(async move {
-                    disaster_recovery_service.sync_all().await;
-                });
 
                 let mut operation = self.request.operation.clone();
                 if let RequestOperation::SystemUpgrade(operation) = &mut operation {

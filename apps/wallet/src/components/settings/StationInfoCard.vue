@@ -1,7 +1,11 @@
 <template>
-  <VCard>
-    <VCardTitle data-test-id="user-selected-station-name">
+  <VCard :loading="loadingSystemInfo">
+    <VCardTitle
+      data-test-id="user-selected-station-name"
+      class="d-flex align-center justify-space-between"
+    >
       {{ $t(`app.station_info_card_title`, { name: station.name }) }}
+      <VBtn variant="text" :icon="mdiLifebuoy" :to="`/${$route.params.locale}/disaster-recovery`" />
     </VCardTitle>
     <VCardText class="pb-0">
       <VList lines="two" class="bg-transparent">
@@ -119,15 +123,76 @@
         </VListItem>
         <VListItem class="px-0">
           <VListItemTitle class="font-weight-bold">{{ $t(`terms.version`) }}</VListItemTitle>
-          <VListItemSubtitle>{{
-            station.configuration.details?.version ? station.configuration.details.version : '-'
-          }}</VListItemSubtitle>
+          <VListItemSubtitle class="mt-2"
+            >{{
+              station.configuration.details?.version ? station.configuration.details.version : '-'
+            }}
+          </VListItemSubtitle>
         </VListItem>
+        <AuthCheck :privileges="[Privilege.SystemInfo]">
+          <template v-if="!loadingSystemInfo">
+            <VListItem class="px-0">
+              <VListItemTitle class="font-weight-bold">{{
+                $t(`terms.upgrader_id`)
+              }}</VListItemTitle>
+              <VListItemSubtitle v-if="upgraderId"
+                >{{ upgraderId }}
+                <VBtn
+                  size="x-small"
+                  variant="text"
+                  :icon="mdiContentCopy"
+                  @click="
+                    copyToClipboard({
+                      textToCopy: upgraderId,
+                      sendNotification: true,
+                    })
+                  "
+                />
+              </VListItemSubtitle>
+            </VListItem>
+
+            <VListItem class="px-0">
+              <VListItemTitle class="font-weight-bold">{{
+                $t(`pages.administration.cycle_balances`)
+              }}</VListItemTitle>
+              <VListItemSubtitle>
+                <table style="min-width: 200px">
+                  <tbody>
+                    <tr>
+                      <td>{{ $t('terms.station') }}:</td>
+                      <td class="text-right">
+                        {{ systemInfo ? formatCycles(systemInfo.cycles) : '-' }}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>{{ $t('terms.upgrader') }}:</td>
+                      <td class="text-right">
+                        {{
+                          systemInfo?.upgrader_cycles?.[0]
+                            ? formatCycles(systemInfo.upgrader_cycles[0])
+                            : '-'
+                        }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </VListItemSubtitle>
+            </VListItem>
+          </template>
+          <VListItem v-else-if="loadingSystemInfoError" class="px-0">
+            <VListItemTitle class="font-weight-bold">{{ $t(`terms.upgrader_id`) }}</VListItemTitle>
+            <VListItemSubtitle>
+              <VAlert type="error" variant="tonal" density="compact" class="mb-4 mt-2">
+                {{ $t('pages.administration.system_info_error') }}
+              </VAlert>
+            </VListItemSubtitle>
+          </VListItem>
+        </AuthCheck>
         <VListItem v-if="session.data.stations.length > 1" class="px-0">
           <VListItemTitle class="font-weight-bold">{{ $t(`terms.main`) }}</VListItemTitle>
-          <VListItemSubtitle>{{
-            isMainStation ? $t(`terms.yes`) : $t(`terms.no`)
-          }}</VListItemSubtitle>
+          <VListItemSubtitle
+            >{{ isMainStation ? $t(`terms.yes`) : $t(`terms.no`) }}
+          </VListItemSubtitle>
         </VListItem>
       </VList>
     </VCardText>
@@ -182,8 +247,8 @@
 
 <script lang="ts" setup>
 import { Principal } from '@dfinity/principal';
-import { mdiContentCopy, mdiPencil } from '@mdi/js';
-import { computed, ref } from 'vue';
+import { mdiContentCopy, mdiLifebuoy, mdiPencil } from '@mdi/js';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   VBtn,
@@ -210,7 +275,9 @@ import {
   CycleObtainStrategyInput,
   ManageSystemInfoOperationInput,
   Request,
+  SystemInfo,
 } from '~/generated/station/station.did';
+import { formatCycles } from '~/mappers/cycles.mapper';
 import { storeUserStationToUserStation } from '~/mappers/stations.mapper';
 import { i18n } from '~/plugins/i18n.plugin';
 import { services } from '~/plugins/services.plugin';
@@ -219,8 +286,9 @@ import { useSessionStore } from '~/stores/session.store';
 import { useStationStore } from '~/stores/station.store';
 import { Privilege } from '~/types/auth.types';
 import { copyToClipboard } from '~/utils/app.utils';
-import StationInfoForm, { StationInfoModel } from './StationInfoForm.vue';
+import { hasRequiredPrivilege } from '~/utils/auth.utils';
 import { unreachable, variantIs } from '~/utils/helper.utils';
+import StationInfoForm, { StationInfoModel } from './StationInfoForm.vue';
 
 const station = useStationStore();
 const session = useSessionStore();
@@ -228,6 +296,26 @@ const app = useAppStore();
 const router = useRouter();
 const isMainStation = computed(() => station.canisterId === session.mainStation?.toText());
 const controlPanelService = services().controlPanel;
+const stationPanelService = services().station;
+
+const loadingSystemInfo = ref(true);
+const loadingSystemInfoError = ref(false);
+
+const systemInfo = ref<SystemInfo | null>(null);
+
+onMounted(async () => {
+  if (hasRequiredPrivilege({ anyOf: [Privilege.SystemInfo] })) {
+    try {
+      systemInfo.value = await stationPanelService.systemInfo(true).then(result => result.system);
+    } catch (e: unknown) {
+      app.sendErrorNotification(e);
+      loadingSystemInfoError.value = true;
+    }
+  }
+  loadingSystemInfo.value = false;
+});
+
+const upgraderId = computed(() => systemInfo.value?.upgrader_id.toText());
 
 async function removeStation(): Promise<void> {
   await services().controlPanel.manageUserStations({
@@ -320,6 +408,12 @@ function cycleObtainStrategyToInput(strategy: CycleObtainStrategy): CycleObtainS
         account_id: strategy.MintFromNativeToken.account_id,
       },
     };
+  } else if (variantIs(strategy, 'WithdrawFromCyclesLedger')) {
+    return {
+      WithdrawFromCyclesLedger: {
+        account_id: strategy.WithdrawFromCyclesLedger.account_id,
+      },
+    };
   } else if (variantIs(strategy, 'Disabled')) {
     return { Disabled: null };
   } else {
@@ -333,6 +427,8 @@ const manageSystemInfoInput = ref<{
 }>({
   valid: false,
   model: {
+    max_station_backup_snapshots: [],
+    max_upgrader_backup_snapshots: [],
     name: [station.configuration.details.name],
     cycle_obtain_strategy: station.configuration.cycleObtainStrategy
       ? [cycleObtainStrategyToInput(station.configuration.cycleObtainStrategy)]
@@ -352,6 +448,8 @@ const submitManageSystemInfoOperation = async ({
 const cycleObtainStrategy = computed(() => {
   if (variantIs(station.configuration.cycleObtainStrategy, 'MintFromNativeToken')) {
     return `${i18n.global.t('pages.administration.cycle_obtain_strategy_mint_from_native_token')} "${station.configuration.cycleObtainStrategy.MintFromNativeToken.account_name}"`;
+  } else if (variantIs(station.configuration.cycleObtainStrategy, 'WithdrawFromCyclesLedger')) {
+    return `${i18n.global.t('pages.administration.cycle_obtain_strategy_withdraw_from_cycles_ledger')} "${station.configuration.cycleObtainStrategy.WithdrawFromCyclesLedger.account_name}"`;
   } else if (variantIs(station.configuration.cycleObtainStrategy, 'Disabled')) {
     return i18n.global.t('pages.administration.cycle_obtain_strategy_disabled');
   } else {

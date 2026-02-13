@@ -33,6 +33,17 @@ pub enum RequestOperationType {
     SetDisasterRecovery = 23,
     ConfigureExternalCanister = 24,
     FundExternalCanister = 25,
+    SnapshotExternalCanister = 26,
+    RestoreExternalCanister = 27,
+    PruneExternalCanister = 28,
+    AddAsset = 29,
+    EditAsset = 30,
+    RemoveAsset = 31,
+    MonitorExternalCanister = 32,
+    AddNamedRule = 33,
+    EditNamedRule = 34,
+    RemoveNamedRule = 35,
+    SystemRestore = 36,
 }
 
 /// A helper enum to filter the requests based on the operation type and
@@ -48,12 +59,17 @@ pub enum ListRequestsOperationType {
     EditUserGroup,
     RemoveUserGroup,
     SystemUpgrade,
+    SystemRestore,
     SetDisasterRecovery,
     CreateExternalCanister,
     ChangeExternalCanister(Option<Principal>),
     CallExternalCanister(Option<Principal>),
     ConfigureExternalCanister(Option<Principal>),
     FundExternalCanister(Option<Principal>),
+    MonitorExternalCanister(Option<Principal>),
+    SnapshotExternalCanister(Option<Principal>),
+    RestoreExternalCanister(Option<Principal>),
+    PruneExternalCanister(Option<Principal>),
     EditPermission,
     AddRequestPolicy,
     EditRequestPolicy,
@@ -62,6 +78,12 @@ pub enum ListRequestsOperationType {
     EditAddressBookEntry,
     RemoveAddressBookEntry,
     ManageSystemInfo,
+    AddAsset,
+    EditAsset,
+    RemoveAsset,
+    AddNamedRule,
+    EditNamedRule,
+    RemoveNamedRule,
 }
 
 impl PartialEq<ListRequestsOperationType> for RequestOperationFilterType {
@@ -96,6 +118,9 @@ impl PartialEq<ListRequestsOperationType> for RequestOperationFilterType {
             }
             ListRequestsOperationType::SystemUpgrade => {
                 matches!(self, RequestOperationFilterType::SystemUpgrade)
+            }
+            ListRequestsOperationType::SystemRestore => {
+                matches!(self, RequestOperationFilterType::SystemRestore)
             }
             ListRequestsOperationType::SetDisasterRecovery => {
                 matches!(self, RequestOperationFilterType::SetDisasterRecovery)
@@ -140,6 +165,45 @@ impl PartialEq<ListRequestsOperationType> for RequestOperationFilterType {
                     RequestOperationFilterType::FundExternalCanister(id) if id == canister_id
                 )
             }
+            ListRequestsOperationType::MonitorExternalCanister(None) => {
+                matches!(self, RequestOperationFilterType::MonitorExternalCanister(_))
+            }
+            ListRequestsOperationType::MonitorExternalCanister(Some(canister_id)) => {
+                matches!(
+                    self,
+                    RequestOperationFilterType::MonitorExternalCanister(id) if id == canister_id
+                )
+            }
+            ListRequestsOperationType::SnapshotExternalCanister(None) => {
+                matches!(
+                    self,
+                    RequestOperationFilterType::SnapshotExternalCanister(_)
+                )
+            }
+            ListRequestsOperationType::SnapshotExternalCanister(Some(canister_id)) => {
+                matches!(
+                    self,
+                    RequestOperationFilterType::SnapshotExternalCanister(id) if id == canister_id
+                )
+            }
+            ListRequestsOperationType::RestoreExternalCanister(None) => {
+                matches!(self, RequestOperationFilterType::RestoreExternalCanister(_))
+            }
+            ListRequestsOperationType::RestoreExternalCanister(Some(canister_id)) => {
+                matches!(
+                    self,
+                    RequestOperationFilterType::RestoreExternalCanister(id) if id == canister_id
+                )
+            }
+            ListRequestsOperationType::PruneExternalCanister(None) => {
+                matches!(self, RequestOperationFilterType::PruneExternalCanister(_))
+            }
+            ListRequestsOperationType::PruneExternalCanister(Some(canister_id)) => {
+                matches!(
+                    self,
+                    RequestOperationFilterType::PruneExternalCanister(id) if id == canister_id
+                )
+            }
             ListRequestsOperationType::EditPermission => {
                 matches!(self, RequestOperationFilterType::EditPermission)
             }
@@ -164,6 +228,24 @@ impl PartialEq<ListRequestsOperationType> for RequestOperationFilterType {
             ListRequestsOperationType::ManageSystemInfo => {
                 matches!(self, RequestOperationFilterType::ManageSystemInfo)
             }
+            ListRequestsOperationType::AddAsset => {
+                matches!(self, RequestOperationFilterType::AddAsset)
+            }
+            ListRequestsOperationType::EditAsset => {
+                matches!(self, RequestOperationFilterType::EditAsset)
+            }
+            ListRequestsOperationType::RemoveAsset => {
+                matches!(self, RequestOperationFilterType::RemoveAsset)
+            }
+            ListRequestsOperationType::AddNamedRule => {
+                matches!(self, RequestOperationFilterType::AddNamedRule)
+            }
+            ListRequestsOperationType::EditNamedRule => {
+                matches!(self, RequestOperationFilterType::EditNamedRule)
+            }
+            ListRequestsOperationType::RemoveNamedRule => {
+                matches!(self, RequestOperationFilterType::RemoveNamedRule)
+            }
         }
     }
 }
@@ -185,6 +267,7 @@ impl FromStr for RequestOperationType {
             "edit_user_group" => Ok(RequestOperationType::EditUserGroup),
             "remove_user_group" => Ok(RequestOperationType::RemoveUserGroup),
             "system_upgrade" => Ok(RequestOperationType::SystemUpgrade),
+            "system_restore" => Ok(RequestOperationType::SystemRestore),
             "change_external_canister" => Ok(RequestOperationType::ChangeExternalCanister),
             "create_external_canister" => Ok(RequestOperationType::CreateExternalCanister),
             "call_external_canister" => Ok(RequestOperationType::CallExternalCanister),
@@ -196,6 +279,7 @@ impl FromStr for RequestOperationType {
             "set_disaster_recovery_committee" => Ok(RequestOperationType::SetDisasterRecovery),
             "configure_external_canister" => Ok(RequestOperationType::ConfigureExternalCanister),
             "fund_external_canister" => Ok(RequestOperationType::FundExternalCanister),
+            "monitor_external_canister" => Ok(RequestOperationType::MonitorExternalCanister),
             _ => Err(()),
         }
     }
@@ -216,9 +300,19 @@ impl Display for RequestOperationType {
             RequestOperationType::EditUserGroup => write!(f, "edit_user_group"),
             RequestOperationType::RemoveUserGroup => write!(f, "remove_user_group"),
             RequestOperationType::SystemUpgrade => write!(f, "system_upgrade"),
+            RequestOperationType::SystemRestore => write!(f, "system_restore"),
             RequestOperationType::ChangeExternalCanister => write!(f, "change_external_canister"),
             RequestOperationType::CreateExternalCanister => write!(f, "create_external_canister"),
             RequestOperationType::CallExternalCanister => write!(f, "call_external_canister"),
+            RequestOperationType::SnapshotExternalCanister => {
+                write!(f, "snapshot_external_canister")
+            }
+            RequestOperationType::RestoreExternalCanister => {
+                write!(f, "restore_external_canister")
+            }
+            RequestOperationType::PruneExternalCanister => {
+                write!(f, "prune_external_canister")
+            }
             RequestOperationType::EditPermission => write!(f, "edit_permission"),
             RequestOperationType::AddRequestPolicy => write!(f, "add_request_policy"),
             RequestOperationType::EditRequestPolicy => write!(f, "edit_request_policy"),
@@ -231,6 +325,13 @@ impl Display for RequestOperationType {
                 write!(f, "configure_external_canister")
             }
             RequestOperationType::FundExternalCanister => write!(f, "fund_external_canister"),
+            RequestOperationType::MonitorExternalCanister => write!(f, "monitor_external_canister"),
+            RequestOperationType::AddAsset => write!(f, "add_asset"),
+            RequestOperationType::EditAsset => write!(f, "edit_asset"),
+            RequestOperationType::RemoveAsset => write!(f, "remove_asset"),
+            RequestOperationType::AddNamedRule => write!(f, "add_named_rule"),
+            RequestOperationType::EditNamedRule => write!(f, "edit_named_rule"),
+            RequestOperationType::RemoveNamedRule => write!(f, "remove_named_rule"),
         }
     }
 }
@@ -320,6 +421,10 @@ mod tests {
         assert_eq!(
             RequestOperationType::from_str("system_upgrade").unwrap(),
             RequestOperationType::SystemUpgrade
+        );
+        assert_eq!(
+            RequestOperationType::from_str("system_restore").unwrap(),
+            RequestOperationType::SystemRestore
         );
         assert_eq!(
             RequestOperationType::from_str("change_external_canister").unwrap(),

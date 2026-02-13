@@ -3,25 +3,37 @@
     v-model="model"
     :multiple="props.multiple.value"
     :label="props.label.value"
-    item-value="value"
-    item-title="text"
+    :custom-filter="() => true"
+    auto-select-first
+    item-value="id"
+    item-title="address_owner"
+    return-object
+    clear-on-select
+    hide-selected
     :items="items"
     :variant="props.variant.value"
     :density="props.density.value"
     :readonly="props.readonly.value"
     :disabled="props.disabled.value"
-    @update:search="autocomplete.search = $event"
-  />
+    @update:search="autocomplete.searchItems($event)"
+  >
+    <template #item="{ props: itemProps, item }">
+      <!-- prettier-ignore -->
+      <VListItem @click="(itemProps.onClick as any)">
+        <VListItemTitle>{{ item.raw.address_owner }}</VListItemTitle>
+        <VListItemSubtitle>{{ item.raw.address }}</VListItemSubtitle>
+      </VListItem>
+    </template>
+  </VAutocomplete>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, ref, toRefs, watch } from 'vue';
 import { useAddressBookAutocomplete } from '~/composables/autocomplete.composable';
-import { UUID } from '~/generated/station/station.did';
-import { SelectItem } from '~/types/helper.types';
+import { AddressBookEntry } from '~/generated/station/station.did';
 
 const input = withDefaults(
   defineProps<{
-    modelValue?: UUID[] | UUID;
+    modelValue?: AddressBookEntry[] | AddressBookEntry;
     label?: string;
     variant?: 'underlined' | 'outlined';
     density?: 'comfortable' | 'compact';
@@ -43,8 +55,7 @@ const input = withDefaults(
 const props = toRefs(input);
 
 const emit = defineEmits<{
-  (event: 'update:modelValue', payload: UUID[] | UUID): void;
-  (event: 'remove', payload: void): void;
+  (event: 'update:modelValue', payload: AddressBookEntry[] | AddressBookEntry): void;
 }>();
 
 const model = computed({
@@ -52,39 +63,17 @@ const model = computed({
   set: value => emit('update:modelValue', value),
 });
 
-const items = ref<SelectItem[]>([]);
-
+const items = ref<AddressBookEntry[]>([]);
 const autocomplete = useAddressBookAutocomplete();
 
-const updateAvailableItemsList = (results: SelectItem[] = []) => {
-  const selectedItems = Array.isArray(model.value) ? model.value : [model.value];
-  for (const item of selectedItems) {
-    const found = results.find(i => i.value === item);
-    if (!found) {
-      results.push({
-        value: item,
-        text: item,
-      });
-    }
-  }
-
-  items.value = results;
-};
-
 onMounted(() => {
-  updateAvailableItemsList();
   autocomplete.searchItems();
 });
 
 watch(
   () => autocomplete.results.value,
   results => {
-    const updatedItems = results.map(result => ({
-      value: result.id,
-      text: result.address,
-    }));
-
-    updateAvailableItemsList(updatedItems);
+    items.value = results;
   },
 );
 </script>

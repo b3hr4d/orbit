@@ -1,7 +1,7 @@
 export default {
   app: {
-    title: 'Portefeuille {app}',
-    name: 'Orbit Wallet',
+    title: '{app}',
+    name: 'Orbit',
     action_save_failed: "Échec de sauvegarde de l'action, veuillez essayer de nouveau.",
     action_save_success: "Sauvegarde de l'action réussie.",
     session_load_error: 'Échec du chargement votre session, veuillez essayer de nouveau.',
@@ -21,6 +21,7 @@ export default {
     station_info_card_remove_btn: 'Retirer le portefeuille',
     station_info_card_remove_btn_confirm: 'Êtes-vous sûrs de vouloir retirer ce portefeuille?',
     disaster_recovery_card_title: 'Sauvegarde',
+    disaster_recovery: 'Récupération après sinistre',
     disaster_recovery_not_configured: 'Sauvegarde non configurée.',
     disaster_recovery_dialog_title: 'Configurer la sauvegarde',
     manage_associated_station: 'Gerer le portefeuille associé',
@@ -53,6 +54,7 @@ export default {
     search_users: 'Rechercher des usagers',
     search_user_groups: "Rechercher des groupes d'usagers",
     search_accounts: 'Rechercher des comptes',
+    search_addresses: 'Rechercher des adresses...',
     destination_source: 'Destination / Source',
     amount_token: 'Montant, {token}',
     no_transfers: 'Aucun transfert trouvé.',
@@ -97,30 +99,33 @@ export default {
       verify_instructions:
         'Pour vérifier la mise à jour, ouvrez le terminal et suivez les instructions ci-dessous:',
     },
+    asset: 'Actif',
     no_data: 'Pas de données disponibles.',
     no_matching_results: 'Pas de résultats correspondants trouvés pour `{search}`.',
     add_new_label: 'Ajouter une nouvelle étiquette: {label}',
     user_cancel_pending_requests: 'Annuler toutes les demandes en attente de cet usager.',
     error_dialog_title: 'Échec de chargement.',
     error_dialog_message: 'Échec de chargement, veuillez réessayer.',
-  },
-  alpha_warning: {
-    version: 'Ceci est une version alpha.',
-    caution: 'Utilisez avec prudence.',
+    request_submit_failed: 'Échec de la requête, veuillez réessayer.',
   },
   sidebar: {
     highlights: {
-      main: 'Portefeuille Trustless {line1} {line2} {line3}',
-      line3: 'Multichain',
-      line1: 'Actifs Numériques',
-      line2: 'Multi-Garde',
+      main: 'Portefeuille de confiance {line1} {line2} {line3}',
+      line1: 'Approbation multiple',
+      line2: 'Gestion d actifs',
+      line3: 'Contrat intelligent',
     },
   },
   blockchains: {
     icp: {
       name: 'Internet Computer',
       standards: {
-        native: 'Native',
+        icp_native: 'ICP (Native)',
+        icrc1: 'ICRC-1',
+      },
+      formats: {
+        icp_account_identifier: 'ICP Native',
+        icrc1_account: 'ICRC-1',
       },
     },
     eth: {
@@ -150,6 +155,8 @@ export default {
     no_results_found: 'Aucun resultat trouvé.',
     no_more_requests_to_approve: 'Pas de demandes à approuver.',
     load_next: 'Charger le suivant',
+    failed_to_fetch_details:
+      "Échec de récupération des détails de l'entrée existante. Les changements demandés ne peuvent pas être affichés.",
     status: {
       created: 'En Attente',
       cancelled: 'Annulé',
@@ -172,6 +179,7 @@ export default {
     processing_scheduled_at: 'Traitement prévu à {dt}',
     no_cancelled_reason: 'Pas de raison déclarée.',
     no_failed_reason: 'Pas de raison déclarée.',
+    request_url_copied_to_clipboard: 'URL de la demande copiée.',
     domains: {
       all: 'Tout',
       accounts: 'Comptes',
@@ -179,6 +187,7 @@ export default {
       system: 'Système',
       transfers: 'Transferts',
       users: 'Usagers',
+      assets: 'Actifs',
       external_canisters: 'Canisters',
     },
     headers: {
@@ -210,6 +219,10 @@ export default {
       amount: 'Montant',
       fee: 'Frais',
       comment: 'Commentaire',
+      rule_id: 'ID de Règle',
+      rule_name: 'Nom de Règle',
+      rule_description: 'Description de Règle',
+      url: 'URL',
     },
     download: {
       user_group: "Groupes d'Usagers",
@@ -222,6 +235,8 @@ export default {
       transfer: 'Transferts',
       external_canister: 'Canister Géré',
       system_info: 'Informations Système',
+      asset: 'Actifs',
+      named_rule: 'Règles d approbation',
     },
     types: {
       addusergroup: {
@@ -275,6 +290,9 @@ export default {
       editaccount: {
         title: 'Modifier de modifier un compte',
         request_title: 'Demande de modifier un compte',
+        added_assets: 'Ajouté',
+        removed_assets: 'Supprimé',
+        replaced_assets: 'Remplacé',
       },
       editaddressbookentry: {
         title: "Modifier une entrée de carnet d'adresses",
@@ -291,6 +309,18 @@ export default {
       managesysteminfo: {
         title: 'Gérer les informations système',
         request_title: 'Demande de gérer les informations système',
+      },
+      addasset: {
+        title: 'Ajouter un actif',
+        request_title: 'Demande d ajouter un actif',
+      },
+      editasset: {
+        title: 'Modifier un actif',
+        request_title: 'Demande de modifier un actif',
+      },
+      removeasset: {
+        title: 'Supprimer un actif',
+        request_title: 'Demande de supprimer un actif',
       },
       createexternalcanister: {
         title: 'Créer un canister',
@@ -315,6 +345,18 @@ export default {
       setdisasterrecovery: {
         title: 'Éditer la sauvegarde',
         request_title: 'Demande d édition de sauvegarde',
+      },
+      addnamedrule: {
+        title: 'Ajouter une règle d approbation',
+        request_title: 'Demande d ajout d une règle d approbation',
+      },
+      editnamedrule: {
+        title: 'Modifier une règle d approbation',
+        request_title: 'Demande de modification d une règle d approbation',
+      },
+      removenamedrule: {
+        title: 'Supprimer une règle d approbation',
+        request_title: 'Demande de suppression d une règle d approbation',
       },
       unknown: {
         title: 'Inconnu',
@@ -369,10 +411,15 @@ export default {
     },
   },
   landing: {
-    title: 'Gestion Multichain',
-    subtitle: 'Une Plateforme, Une Supervision Complète',
-    description:
-      'Orbit simplifie la gestion des actifs on-chain pour les entreprises, les DAOs et les équipes, en consolidant le contrôle et la visibilité sur une seule plateforme intuitive.',
+    btn_accept_license: {
+      phrase: 'En cliquant sur ce bouton, vous acceptez les {0}.',
+      license: 'Licence',
+    },
+    highlights: {
+      multiapproval: 'Politiques d approbation',
+      treasury: 'Gestion du Trésor',
+      smartcontract: 'Gestion de Contrat Intelligent',
+    },
     connect_title: 'Connectez-vous en toute sécurité pour gérer vos actifs numériques',
     connect_btn: 'Se connecter avec Internet Identity',
     connect_error: 'Échec de la connexion, veuillez réessayer.',
@@ -436,7 +483,17 @@ export default {
       tc: 'TC',
       bc: 'Milliard',
       mc: 'Million',
-      e8s: 'e8s',
+      cycles: 'Cycles',
+    },
+  },
+  time: {
+    units: {
+      y: 'Années',
+      m: 'Mois',
+      d: 'Jours',
+      h: 'Heures',
+      min: 'Minutes',
+      sec: 'Secondes',
     },
   },
   external_canisters: {
@@ -457,11 +514,67 @@ export default {
     not_found_description: 'Le canister que vous cherchez n a pas été trouvé.',
     ic_settings: 'Paramètres IC',
     top_up: 'Recharger',
+    start_monitoring: 'Démarrer la surveillance',
+    monitor: {
+      title: 'Contrôler les cycles',
+      start_title: 'Surveiller',
+      stop_title: 'Arrêter la surveillance',
+      funding_strategy_label: 'Stratégie de financement',
+      cycle_obtain_strategy_label: 'Stratégie de monnayage du cycle',
+      funding_info_text: 'La stratégie choisie est évaluée toutes les 6 heures.',
+      strategy: {
+        label: 'Stratégie de suivi',
+        BelowEstimatedRuntime: "Durée d'exécution inférieure à l'estimation",
+        BelowThreshold: 'En dessous du seuil',
+        Always: 'Toujours',
+        fund_runtime_secs: "Durée d'exécution pour le financement",
+        min_runtime_secs: "Seuil de durée d'exécution",
+        max_runtime_cycles_fund: 'Cycles maximum à financer',
+        fallback_min_cycles: 'Seuil de cycles de secours',
+        fallback_fund_cycles: 'Cycles de secours à financer',
+        min_cycles: 'Seuil de cycles',
+        fund_cycles: 'Cycles à financer',
+        fund_runtime_secs_hint: 'Spécifiez la durée pour laquelle le canister doit être financé.',
+        min_runtime_secs_hint:
+          "Spécifiez le seuil minimal de durée d'exécution pour déclencher le financement.",
+        max_runtime_cycles_fund_hint:
+          'Spécifiez le nombre maximum de cycles pouvant être financés en une seule fois.',
+        fallback_min_cycles_hint:
+          "Spécifiez le seuil minimal de cycles pour le financement de secours lorsque la durée d'exécution ne peut pas être calculée.",
+        fallback_fund_cycles_hint:
+          "Spécifiez les cycles à financer pour le financement de secours lorsque la durée d'exécution ne peut pas être calculée.",
+        min_cycles_hint: 'Spécifiez le seuil de cycles pour déclencher le financement.',
+        fund_cycles_hint: 'Spécifiez les cycles à financer.',
+      },
+    },
+    obtain: {
+      title: 'Obtenir des cycles',
+      strategy: {
+        label: 'Stratégie d obtention',
+        StationDefault: 'Défaut de Station',
+        MintFromNativeToken: 'Mint depuis le token natif',
+        WithdrawFromCyclesLedger: 'Retrait du grand livre des cycles',
+      },
+    },
     configuration: 'Configuration',
     unlink: 'Dissocier',
     unlink_title: 'Dissocier le Canister',
     unlink_soft_delete: 'Gardez le canister sur l ordinateur, supprime seulement sa référence.',
     performed_calls: 'Appels effectués',
+    snapshots: {
+      title: 'Snapshots',
+      no_snapshots: 'Aucun snapshot na été créé pour ce canister.',
+      create_snapshot: 'Créer un snapshot',
+      create_snapshot_description:
+        'Les snapshots garantissent que vos informations sont stockées en toute sécurité et peuvent être restaurées en cas de perte ou de corruption des données. Ils permettent également d’itérer en toute sécurité, sachant que vos données précédentes sont préservées.',
+      id: 'ID',
+      size_mb: 'Taille (mb)',
+      created_at: 'Créé le',
+      remove_snapshot_title: 'Suppression de snapshot',
+      restore_snapshot_title: 'Restauration de snapshot',
+      restore_snapshot_confirmation: 'Êtes-vous sûr de vouloir restaurer ce snapshot ?',
+      remove_snapshot_confirmation: 'Êtes-vous sûr de vouloir supprimer ce snapshot ?',
+    },
     perform_call: {
       title: 'Effectuer un Appel',
       reply_received: 'Réponse reçue',
@@ -520,7 +633,9 @@ export default {
     install: 'Installer',
     send_cycles: 'Envoyer des cycles',
     top_up_hint: 'Montant de cycles à ajouter au canister cible.',
+    monitor_hint: 'Configuration pour la surveillance automatisée des cycles.',
     add_controller: 'Ajouter un contrôleur',
+    add_principal: 'Ajouter un principal',
     no_controllers: 'Pas de contrôleurs',
     self_controller: 'Contrôleur de soi',
     non_orbit_controllers_warning:
@@ -560,12 +675,17 @@ export default {
     },
   },
   terms: {
+    license: 'Licence',
+    loading: 'Chargement',
+    permission: 'Permission',
     controllers: 'Contrôleurs',
     public: 'Public',
+    allowed_viewers: 'Voir les autorisés',
     execute: 'Exécuter',
     error: 'Erreur',
     self: 'Soi',
     more: 'Plus',
+    restore: 'Restaurer',
     less: 'Moins',
     data: 'Données',
     mode: 'Mode',
@@ -594,6 +714,7 @@ export default {
     comment: 'Commentaire',
     comment_optional: 'Commentaire (optionnel)',
     arg: 'Paramètre',
+    access: 'Accès',
     target: 'Cible',
     previous: 'Précédent',
     next: 'Suivant',
@@ -604,6 +725,7 @@ export default {
     approval_policies: "Politiques d'approbation",
     download: 'Télécharger',
     upgrader: 'Metteur à jour',
+    upgrader_id: 'ID du Metteur à jour',
     view: 'Voir',
     new_address: 'Nouvelle Adresse',
     request: 'Demande',
@@ -627,6 +749,7 @@ export default {
     save: 'Sauvegarder',
     see_all: 'Voir Tout',
     cancel: 'Annuler',
+    cancel_request: 'Annuler la demande',
     checksum: 'Checksum',
     module_checksum: 'Checksum du Module',
     rejected: 'Rejetté',
@@ -704,6 +827,7 @@ export default {
     principal: 'Principal',
     status: 'Statut',
     transfer: 'Transfert',
+    transfer_asset: 'Transfert {asset}',
     invalid: 'Invalide',
     control_panel: 'Paneau de Contrôle',
     confirmed: 'Confirmé',
@@ -718,6 +842,9 @@ export default {
     version: 'Version',
     continue: 'Continuer',
     cycle_obtain_strategy: 'Méthode de recharge du portefeuille',
+    symbol: 'Symbole',
+    standards: 'Standards',
+    assets: 'Actifs',
   },
   forms: {
     create: 'Créer',
@@ -740,11 +867,15 @@ export default {
       numberRange: 'Le champ doit contenir une valeur valide entre {min} et {max}.',
       invalidDecimalPlaces: 'Ce champ doit contenir un maximum de {decimals} décimales.',
       isHex: 'Ce champ doit contenir une valeur hexadécimale valide.',
+      validAddress: 'Ce champ doit contenir une adresse valide.',
+      validSymbol: 'Le symbole doit contenir entre 1 et 32 charactères alphanumériques.',
     },
   },
   navigation: {
     home: 'Acceuil',
+    dashboard: 'Tableau de Bord',
     accounts: 'Comptes',
+    account: 'Compte',
     address_book: "Carnet d'Adresses",
     users: 'Usagers',
     settings: 'Settings',
@@ -758,9 +889,15 @@ export default {
     transfer_requests: 'Demandes de Transfert',
     permissions: "Polices d'Accés",
     request_policies: "Polices d'Aprobation",
+    assets: 'Actifs',
     external_canisters: 'Canisters',
+    approval_rules: 'Règles d approbation',
   },
   pages: {
+    dashboard: {
+      title: 'Tableau de Bord',
+      available_assets: 'Actifs Disponibles',
+    },
     accounts: {
       title: 'Comptes',
       btn_new_transfer: 'Nouveau Transfert',
@@ -783,6 +920,14 @@ export default {
       csv_ignored_transfers_hint: 'Transfers with errors will be ignored.',
       csv_transfer_failed: 'Échec de process transfers, veuillez essayer de nouveau.',
       csv_download_invalid: 'Téléchargement invalide',
+      add_asset: 'Ajouter un actif',
+      remove_asset: 'Supprimer un actif',
+      no_assets_to_add: 'Pas d actifs disponibles à ajouter.',
+      remove_asset_confirm:
+        'Êtes-vous sûr de vouloir supprimer cet actif? Supprimer l actif n affecte pas le solde du compte. Réajouter l actif restaurera l accès au solde.',
+      transfers_not_supported: 'Les transferts ne sont pas supportés pour cet actif.',
+      add_index_canister_to_see_transactions:
+        'Considérez d ajouter le canister d index à l actif pour voir les transactions.',
     },
     address_book: {
       title: "Carnet d'Adresses",
@@ -790,6 +935,7 @@ export default {
       no_results_found: "Aucune adresse trouvée dans le carnet d'adresses.",
       error_fetching_address_book:
         "Erreur de chargement du carnet d'adresses, veuillez essayer de nouveau.",
+      table_title: 'Adresses',
     },
     user_settings: {
       title: 'Détails du Compte et Paramètres',
@@ -797,8 +943,12 @@ export default {
     },
     administration: {
       title: 'Administration',
+      system_info_error: 'Erreur lors du chargement des informations système, veuillez réessayer.',
       cycle_obtain_strategy_disabled: 'Stratégie de recharge des cycles non définie',
       cycle_obtain_strategy_mint_from_native_token: 'Mint depuis le compte ICP',
+      cycle_obtain_strategy_withdraw_from_cycles_ledger:
+        'Retrait du compte du grand livre des cycles',
+      cycle_balances: 'Solde de Cycles',
     },
     users: {
       title: 'Usagers',
@@ -830,12 +980,12 @@ export default {
       add_station_title: 'Comment aimeriez-vous ajouter un portefeuille?',
       option_join_existing_station: 'Rejoindre un portefeuille existant',
       option_deploy_new_station: 'Déployer un nouveau portefeuille',
-      check_permissions_title: 'Vérification du statut de la liste d attente...',
-      join_waitlist_title: 'Rejoindre la liste d attente',
-      join_waitlist_body:
-        "Rejoignez la liste d'attente d'Orbit! Entrez votre email pour obtenir un accès anticipé et des mises à jour exclusives. Votre voyage commence maintenant.",
-      join_waitlist_email_field: 'Entrez votre adresse e-mail',
-      join_waitlist: "S'inscrire maintenant",
+      join_station_title: 'Rejoindre un portefeuille existant',
+      join_station_body:
+        "Contactez le propriétaire pour obtenir l'ID du portefeuille et envoyez-lui votre identité afin qu'un utilisateur puisse être créé pour vous.",
+      join_station_canister_id: 'ID du Portefeuille',
+      join_station_name: 'Nom du Portefeuille',
+      join_station: 'Rejoindre le portefeuille',
 
       station_title: 'Créer un portefeuille',
       station_body:
@@ -843,26 +993,19 @@ export default {
       station_name_field: 'Nom du Portefeuille',
       admin_name_field: "Ton nom d'utilisateur",
 
-      waitlist_pending_title: 'Vous êtes sur la liste d attente!',
-      waitlist_pending_body:
-        'Veuillez attendre l approbation. Vous recevrez un email une fois votre demande approuvée.',
-      waitlist_denied_title: 'Vous avez été refusé l accès.',
-      waitlist_denied_body:
-        'Malheureusement, vous n êtes pas éligible pour rejoindre la liste d attente.',
-
-      waitlist_check_error_title: 'Échec de vérification du statut de la liste d attente',
-      waitlist_check_error_body:
-        "Échec de la vérification du statut de la liste d'attente, veuillez réessayer.",
+      check_permissions_title: "Vérification de l'éligibilité au déploiement...",
 
       quota_exceed_error_title: 'Quota dépassé',
-      quota_exceed_error_body: 'Le nombre maximum de portefeuilles a été atteint.',
+      quota_exceed_error_body:
+        'Vous avez atteint le nombre maximum de portefeuilles que vous pouvez créer.',
 
-      join_station_title: 'Rejoindre un portefeuille existant',
-      join_station_body:
-        "Contactez le propriétaire pour obtenir l'ID du portefeuille et envoyez-lui votre identité afin qu'un utilisateur puisse être créé pour vous.",
-      join_station_canister_id: 'ID du Portefeuille',
-      join_station_name: 'Nom du Portefeuille',
-      join_station: 'Rejoindre le portefeuille',
+      waitlist_denied_title: 'Accès refusé.',
+      waitlist_denied_body:
+        "Malheureusement, vous n'êtes pas éligible pour déployer un portefeuille.",
+
+      deployment_check_error_title: "Échec de la vérification d'éligibilité au déploiement",
+      deployment_check_error_body:
+        "Échec de la vérification d'éligibilité au déploiement, veuillez réessayer.",
 
       status_starting: 'Initialization, veuillez patienter...',
       status_deploying: 'Deploiement de votre portefeuille au Internet Computer ...',
@@ -881,8 +1024,36 @@ export default {
     },
     request_policies: {
       title: "Polices d'Aprobation",
-      create_label: 'Ajouter un police',
-      dialog_title: 'Police',
+      create_label: 'Ajouter une politique d approbation',
+      dialog_title: 'Police d approbation',
+    },
+    assets: {
+      title: 'Actifs',
+      btn_new_entry: 'Nouvel Actif',
+      no_results_found: 'Pas d actif trouvé.',
+      error_fetching_assets: 'Erreur lors du chargement des actifs, veuillez essayer de nouveau.',
+      forms: {
+        ledger_canister_id: 'ID du Canister Ledger',
+        index_canister_id: 'ID du Canister Index',
+        decimals: 'Décimales',
+      },
+      well_known: {
+        groups: {
+          sns: 'SNS tokens',
+          ck_tokens: 'Chain-key tokens',
+        },
+        placeholder: 'Rechercher un actif...',
+        option_add_well_known_assets: 'Ajouter des actifs connus',
+        option_add_custom_asset: 'Ajouter un actif personnalisé',
+      },
+    },
+    approval_rules: {
+      btn_new_entry: 'Ajouter une règle d approbation',
+      title: 'Règle d approbation',
+      dialog: {
+        title: 'Règle d approbation',
+      },
+      linked_policies: 'Polices liées',
     },
     not_found: {
       title: 'Oulala, 404',
@@ -908,6 +1079,62 @@ export default {
       title: 'Erreur',
       subtitle: 'Une erreur est survenue lors du chargement de la page.',
     },
+    disaster_recovery: {
+      title: 'Récupération après sinistre',
+      upgrader_status: 'Statut du système de mise à jour',
+      loading_upgrader: 'Chargement du système de mise à jour...',
+
+      disaster_recovery_state: 'État de la récupération après sinistre',
+      disaster_recovery_state_loading: "Chargement de l'état de récupération après sinistre...",
+
+      recent_logs: 'Journaux récents',
+
+      select_orbit_station_version: 'Sélectionner la version du portefeuille Orbit',
+
+      submit_recovery_request: 'Soumettre une demande de récupération',
+      submit_button: 'Soumettre une demande de récupération',
+
+      station_idl: 'IDL du portefeuille',
+      upgrader_idl: 'IDL du système de mise à jour',
+
+      station_service_payload: 'Payload du service de portefeuille',
+
+      result: 'Résultat',
+
+      recovery_instructions:
+        "Contactez l'administrateur de votre portefeuille pour obtenir un payload de récupération.",
+      error_logs_unauthorized: 'Non autorisé à consulter les journaux',
+      error_state_unauthorized: "Non autorisé à consulter l'état",
+
+      error_state: 'Échec de récupération du système de mise à jour: {error}',
+      error_no_upgrader_found: 'Aucun système de mise à jour trouvé',
+      error_state_loading_failed:
+        "Échec de récupération de l'état de récupération après sinistre: {error}",
+      error_logs_loading_failed: 'Échec de récupération des journaux: {error}',
+
+      error_registry_loading_failed: 'Échec de la requête au registre de mise à jour: {error}',
+
+      success_submit_recovery: 'Demande de récupération soumise avec succès',
+      error_submit_recovery: 'Échec de soumission de la demande de récupération: {error}',
+
+      help_block: `
+<p>La récupération après sinistre est destinée à récupérer l'accès aux actifs dans le cas où le canister du portefeuille devient non opérationnel ou inaccessible. Elle fonctionne en soumettant une demande de récupération au canister de mise à jour du portefeuille qui stocke, entre autres, une sauvegarde des données utilisateur principales et des informations de compte du portefeuille.</p>
+<p>La soumission d'une demande de récupération implique la construction d'un payload de récupération, qui est une valeur Candid spécifiant les données utilisateur et de compte à récupérer, la version du portefeuille à utiliser et la méthode de récupération (c'est-à-dire, installation/réinstallation/mise à jour).</p>
+<p>Le canister de mise à jour stocke un ensemble d'utilisateurs appelé "comité de récupération après sinistre" qui doivent parvenir à un consensus sur la demande de récupération pour que le processus de récupération puisse démarrer. Le nombre d'utilisateurs devant parvenir à un consensus est appelé "quorum". Ces informations sont consultées et affichées dans la carte "Statut du système de mise à jour".</p>
+<p>Le processus de récupération est le suivant:</p>
+<ol>
+<li>À partir du registre de mise à jour de version, sélectionnez la version du portefeuille vers laquelle vous souhaitez récupérer. L'IDL du portefeuille (la définition API du portefeuille) est affichée pour la version sélectionnée.</li>
+<li>Construisez le payload Candid d'initialisation du service (par exemple, pour \`(opt SystemInstall)\`) qui sera utilisé comme argument pour l'opération de réinstallation/installation/mise à jour. Si le canister de mise à jour est suffisamment à jour, l'interface utilisateur remplira automatiquement cela en fonction du stockage de sauvegarde du système de mise à jour. La construction d'un payload valide donnera une représentation binaire du payload qui doit être utilisée à l'étape suivante.</li>
+<li>La page affichera l'IDL du système de mise à jour (la définition API du système de mise à jour) actuellement utilisé pour le portefeuille. Construisez le payload de demande de récupération après sinistre (pour le type \`RequestDisasterRecoveryInput\`) en utilisant l'IDL et le payload de l'étape précédente. L'interface utilisateur remplira automatiquement le payload pour vous si le payload d'argument est disponible.</li>
+<li>Lorsque le payload final est valide, cliquez sur le bouton soumettre pour soumettre la demande de récupération.</li>
+<li>Un nombre suffisant d'utilisateurs (c'est-à-dire, exactement le montant du \`quorum\`) doivent soumettre la même demande de récupération avant que le processus de récupération puisse démarrer. Les utilisateurs peuvent soumettre à nouveau des demandes plusieurs fois; chaque soumission remplacera la précédente.</li>
+<li>Le processus de récupération démarrera après que le quorum soit atteint. Le système de mise à jour effectuera l'opération spécifiée dans le payload.</li>
+</ol>
+<p>Bonne chance!</p>`,
+
+      warning_block:
+        "Attention: la récupération après sinistre est un processus complexe qui pourrait entraîner une perte irréversible d'accès aux actifs si elle est effectuée incorrectement. Veuillez demander l'aide des membres de la fondation sur le forum.",
+    },
   },
   session: {
     expired_dialog_title: 'Votre session a expiré',
@@ -915,58 +1142,207 @@ export default {
     expired_dialog_btn: 'Ré-authentifiez vous',
   },
   permissions: {
-    resource_title: 'Resource',
-    group_members_title: 'Membres de groupes',
-    specific_users_title: 'Usagers specifiques',
-    everyone_title: 'Tout le monde',
-    individual_resources_title: 'Accés à une resource individuelle',
-    select_resource: 'Type de Resource',
+    global_permissions: 'Autorisations Globales',
+    global_permissions_description:
+      "Les autorisations globales s'appliquent à toutes les zones du système, telles que les comptes, le carnet d'adresses ou d'autres fonctionnalités. Ces autorisations ne sont pas liées à un élément spécifique. Pour configurer les autorisations pour une zone spécifique (par exemple, un compte particulier), accédez à la page de configuration de cet élément et mettez à jour les paramètres.",
+    action_approval_legend:
+      'Les actions que les utilisateurs peuvent effectuer (ex.: créer un transfert) peuvent nécessiter des approbations supplémentaires avant d’être exécutées.',
+    permitted_users: 'Utilisateurs autorisés',
+    restrict_permitted_users: 'Restreindre à certains utilisateurs...',
+    no_users_found: 'Aucun utilisateur trouvé.',
+    allow: {
+      no_access: 'Désactivé pour tout le monde',
+      no_access_tooltip: 'Inaccessible par quiconque, y compris les utilisateurs connectés.',
+      public: 'Public (Connexion Non Requise)',
+      public_tooltip: 'Accessible par tout le monde, y compris les visiteurs non connectés.',
+      authenticated: 'Tous les Utilisateurs Connectés',
+      authenticated_tooltip: 'Accessible par tout utilisateur connecté.',
+      restricted: 'Utilisateurs/Groupes Spécifiques',
+      restricted_tooltip: 'Accessible uniquement aux utilisateurs ou groupes sélectionnés.',
+    },
     resources: {
       account: 'Compte',
-      user: 'Usager',
-      usergroup: "Groupe d'Usagers",
-      permission: "Police d'Accés",
-      requestpolicy: 'Police de Demande',
+      asset: 'Actif',
+      user: 'Utilisateur',
+      usergroup: "Groupe d'Utilisateurs",
+      permission: "Politique d'Accès",
+      requestpolicy: 'Politique de Demande',
       system: 'Système',
       transfer: 'Transfert',
       request: 'Demande',
       addressbook: "Carnet d'Adresses",
-      managesysteminfo: 'Gérer les informations système',
-      externalcanister: 'Canister Géré',
+      managesysteminfo: 'Gérer les Informations Système',
+      externalcanister: 'Canister Externe',
+      namedrule: 'Règle d approbation',
+    },
+    categories: {
+      treasury: 'Trésorerie (comptes, actifs, etc...)',
+      canisters: 'Canisters/Applications',
+      users: 'Utilisateurs',
+      system: "Système (Mises à jour logicielles, Autorisations, Politiques d'Approbation, etc...)",
     },
     actions: {
-      list: 'Lister',
-      create: 'Créer',
-      read: 'Lire',
-      update: 'Modifier',
-      delete: 'Éffacer',
-      transfer: 'Transfert',
-      capabilities: 'Capacités',
-      systeminfo: 'Information Système',
-      systeminfocapabilities: 'Capacités (Actifs Pris en Charge)',
-      systeminfoconfig: 'Configuration (Mises à jour, Métriques, Utilisation)',
-      managesysteminfo: 'Gérer les informations système (par exemple. nom)',
-      systemupgrade: 'Mise à jour du système',
-      change: 'Changement',
-      fund: 'Financer',
-      callcanister: 'Appeler un canister',
-    },
-    allow: {
-      public: "N'importe qui",
-      authenticated: 'Authentifié',
-      restricted: 'Restreint',
+      account_list: 'Voir la Page des Comptes',
+      account_list_description:
+        "Permet d'accéder à la page des comptes, mais affiche uniquement les comptes que l'utilisateur est autorisé à voir.",
+      account_read_any: 'Voir Tous les Comptes',
+      account_read_any_description:
+        "Permet d'afficher tous les comptes, y compris les soldes et les actifs associés.",
+      account_create: 'Ajouter de Nouveaux Comptes',
+      account_create_description:
+        "Permet de créer de nouveaux comptes et d'y attribuer des actifs (ex.: ICP, ckBTC).",
+      account_update_any: 'Modifier les Comptes',
+      account_update_any_description:
+        "Permet de modifier les détails du compte, y compris les autorisations et les politiques d'approbation.",
+      account_transfer_any: 'Créer des Transferts',
+      account_transfer_any_description:
+        "Permet à l'utilisateur d'initier des transferts depuis n'importe quel compte du portefeuille.",
+
+      addressbook_list: "Voir la Page du Carnet d'Adresses",
+      addressbook_list_description:
+        "Permet d'accéder à la page du carnet d'adresses, en affichant uniquement les entrées visibles pour l'utilisateur.",
+      addressbook_read_any: "Voir Toutes les Entrées du Carnet d'Adresses",
+      addressbook_read_any_description:
+        "Permet d'afficher toutes les entrées du carnet d'adresses.",
+      addressbook_create: "Ajouter de Nouvelles Entrées au Carnet d'Adresses",
+      addressbook_create_description:
+        "Permet d'ajouter de nouveaux contacts, y compris des métadonnées telles que des noms et d'autres détails.",
+      addressbook_update_any: "Modifier les Entrées du Carnet d'Adresses",
+      addressbook_update_any_description:
+        "Permet de modifier les entrées existantes du carnet d'adresses, y compris les métadonnées.",
+      addressbook_delete_any: "Supprimer les Entrées du Carnet d'Adresses",
+      addressbook_delete_any_description:
+        "Permet de supprimer des entrées du carnet d'adresses. ⚠ Remarque: Les entrées peuvent être utilisées dans les politiques d'approbation pour restreindre ou autoriser les transferts, alors la suppression doit être effectuée avec précaution.",
+
+      asset_list: 'Voir la Page des Actifs',
+      asset_list_description:
+        "Permet d'accéder à la page des actifs, mais affiche uniquement les actifs visibles pour l'utilisateur.",
+      asset_read_any: 'Voir Tous les Actifs',
+      asset_read_any_description: "Permet d'afficher tous les actifs et leurs détails.",
+      asset_create: 'Ajouter de Nouveaux Actifs',
+      asset_create_description:
+        "Permet d'ajouter de nouveaux actifs au portefeuille, qui peuvent ensuite être attribués à des comptes.",
+      asset_update_any: 'Modifier les Actifs',
+      asset_update_any_description:
+        "Permet de modifier les détails des actifs, y compris les autorisations associées et les politiques d'approbation.",
+      asset_delete_any: 'Supprimer les Actifs',
+      asset_delete_any_description:
+        "Permet de supprimer des actifs. ⚠ Remarque: La suppression d'un actif le retirera de tous les comptes.",
+
+      externalcanister_list: 'Voir la Page des Canisters',
+      externalcanister_list_description:
+        "Permet d'accéder à la page des canisters, en affichant uniquement ceux que l'utilisateur peut voir.",
+      externalcanister_read_any: 'Voir Tous les Canisters',
+      externalcanister_read_any_description:
+        "Permet d'afficher tous les canisters et leurs détails.",
+      externalcanister_create: 'Ajouter de Nouveaux Canisters',
+      externalcanister_create_description:
+        "Permet d'ajouter de nouveaux canisters ou des canisters existants au portefeuille. Le portefeuille peut les contrôler totalement ou agir uniquement comme un outil de surveillance et d'autorisation.",
+      externalcanister_change_any: 'Modifier les Canisters',
+      externalcanister_change_any_description:
+        "Permet de modifier les détails des canisters, les autorisations, les politiques d'approbation, les paramètres et les contrôleurs.",
+      externalcanister_fund_any: 'Financer les Canisters',
+      externalcanister_fund_any_description:
+        "Permet à l'utilisateur d'ajouter des cycles aux canisters en utilisant le portefeuille.",
+      externalcanister_call_execution_method_any_validation_method_no: 'Appeler les Canisters',
+      externalcanister_call_execution_method_any_validation_method_no_description:
+        "Permet d'exécuter des appels vers n'importe quel canister via le portefeuille. ⚠ Remarque: Cette autorisation permet l'exécution d'appels arbitraires vers des canisters, donc des politiques d'approbation appropriées doivent être mises en place.",
+
+      user_list: 'Voir la Page des Utilisateurs',
+      user_list_description:
+        "Permet d'accéder à la page des utilisateurs, en affichant uniquement ceux que l'utilisateur peut voir.",
+      user_read_any: 'Voir Tous les Utilisateurs',
+      user_read_any_description: "Permet d'afficher tous les utilisateurs et leurs détails.",
+      user_create: 'Ajouter de Nouveaux Utilisateurs',
+      user_create_description: "Permet d'ajouter de nouveaux utilisateurs au portefeuille.",
+      user_update_any: 'Modifier les Utilisateurs',
+      user_update_any_description:
+        'Permet de modifier les détails des utilisateurs, y compris leurs identités associées et leur statut.',
+
+      usergroup_list: "Voir la Page des Groupes d'Utilisateurs",
+      usergroup_list_description:
+        "Permet d'accéder à la page des groupes d'utilisateurs, mais affiche uniquement les groupes que l'utilisateur est autorisé à voir.",
+      usergroup_read_any: "Voir Tous les Groupes d'Utilisateurs",
+      usergroup_read_any_description:
+        "Permet d'afficher tous les groupes d'utilisateurs et leurs détails.",
+      usergroup_create: "Ajouter de Nouveaux Groupes d'Utilisateurs",
+      usergroup_create_description:
+        "Permet d'ajouter de nouveaux groupes d'utilisateurs au portefeuille.",
+      usergroup_update_any: "Modifier les Groupes d'Utilisateurs",
+      usergroup_update_any_description:
+        "Permet de modifier les détails des groupes d'utilisateurs.",
+      usergroup_delete_any: "Supprimer les Groupes d'Utilisateurs",
+      usergroup_delete_any_description:
+        "Permet de supprimer des groupes d'utilisateurs. ⚠ Remarque: La suppression d'un groupe supprimera tous ses membres et pourrait affecter les politiques d'approbation qui en dépendent.",
+
+      system_capabilities: 'Voir les Actifs Pris en Charge',
+      system_capabilities_description:
+        "Permet d'afficher la liste des actifs pris en charge, y compris leurs symboles, noms et métadonnées.",
+      system_systeminfo: 'Voir les Informations Système',
+      system_systeminfo_description:
+        "Permet d'afficher les informations système, telles que la version du portefeuille, l'ID de mise à jour et le solde de cycles.",
+      system_managesysteminfo: 'Gérer les Informations Système',
+      system_managesysteminfo_description:
+        'Permet de modifier les paramètres du système, y compris le nom du portefeuille.',
+      system_upgrade: 'Effectuer une Mise à Jour du Système',
+      system_upgrade_description:
+        'Permet de mettre à jour le portefeuille vers une nouvelle version. ⚠ Remarque: Les mises à jour peuvent affecter la disponibilité et la fonctionnalité du portefeuille.',
+
+      permission_update: 'Modifier les Permissions',
+      permission_update_description:
+        'Permet de modifier les autorisations pour les ressources et les actions spécifiées.',
+
+      requestpolicy_list: "Voir l'Onglet des Politiques de Demande",
+      requestpolicy_list_description:
+        "Permet d'accéder à l'onglet des politiques de demande, en affichant uniquement les politiques que l'utilisateur est autorisé à voir.",
+      requestpolicy_read_any: 'Voir Toutes les Politiques de Demande',
+      requestpolicy_read_any_description:
+        "Permet d'afficher toutes les politiques de demande et leurs détails.",
+      requestpolicy_create: 'Ajouter de Nouvelles Politiques de Demande',
+      requestpolicy_create_description:
+        "Permet d'ajouter de nouvelles politiques de demande au portefeuille.",
+      requestpolicy_update_any: 'Modifier les Politiques de Demande',
+      requestpolicy_update_any_description: 'Permet de modifier les politiques de demande.',
+      requestpolicy_delete_any: 'Supprimer les Politiques de Demande',
+      requestpolicy_delete_any_description:
+        "Permet de supprimer des politiques de demande. ⚠ Remarque: La suppression d'une politique de demande peut affecter les demandes existantes qui en dépendent.",
+
+      request_list: 'Voir la Page des Demandes',
+      request_list_description:
+        "Permet d'accéder à la page des demandes, en affichant uniquement les demandes que l'utilisateur est autorisé à voir. Dans la plupart des cas, cela doit être accessible à tous les utilisateurs afin qu'ils puissent suivre les demandes nécessitant leur approbation.",
+      request_read_any: 'Voir Toutes les Demandes',
+      request_read_any_description:
+        "Permet d'afficher toutes les demandes, y compris celles soumises par d'autres utilisateurs.",
+
+      namedrule_list: "Voir l'Onglet des Règles d'Approbation",
+      namedrule_list_description:
+        "Permet d'accéder à l'onglet des règles d'approbation, en affichant uniquement les règles que l'utilisateur est autorisé à voir.",
+      namedrule_read_any: "Voir Toutes les Règles d'Approbation",
+      namedrule_read_any_description:
+        "Permet d'afficher toutes les règles d'approbation et leurs détails.",
+      namedrule_create: "Ajouter de Nouvelles Règles d'Approbation",
+      namedrule_create_description:
+        "Permet d'ajouter de nouvelles règles d'approbation au portefeuille.",
+      namedrule_update_any: "Modifier les Règles d'Approbation",
+      namedrule_update_any_description: "Permet de modifier les règles d'approbation.",
+      namedrule_delete_any: "Supprimer les Règles d'Approbation",
+      namedrule_delete_any_description: "Permet de supprimer les règles d'approbation.",
     },
   },
   request_policies: {
     user_type_select: "Type d'Usager",
     add_rule_label: 'Ajouter un règle +',
     unsupported_specifier: 'Définition de spécificateur non supportée',
+    rule_groups: {
+      custom_rules: 'Règles personnalisées',
+      named_rules: 'Règles d approbation',
+    },
     rule_user_specifier: {
       owner: 'Propriétaire',
       requester: 'Demandeur',
       any: "N'importe quel usager",
-      group: 'Membre du groupe',
-      id: 'Usager spécifique',
+      group: 'Membre du groupe(s)',
+      id: 'Usager spécifique(s)',
     },
     rule: {
       allof: 'Tout les',
@@ -977,6 +1353,31 @@ export default {
       quorumpercentage: 'Pourcentage du Quorum',
       allowlistedbymetadata: 'Liste blanche par metadata',
       allowlisted: 'Liste blanche',
+      named_rule: 'Utiliser la règle d approbation: {name}',
+    },
+    rule_tooltip_summary: {
+      allof: 'Tout les suivants:',
+      anyof: 'Un des suivants:',
+      not: 'Approuvé, sauf quand:',
+    },
+    rule_rich_summary: {
+      complex_rule: 'Règle complexe',
+      no_user_specifier: 'Aucune liste d usagers',
+      any_user_specifier:
+        '1 approbation de n importe quel usager|{n} approbation de n importe quel usager',
+      auto_approved: 'Aucune approbation requise',
+      invalid_rule_auto_approved: 'Règle invalide: Auto-approuvé',
+      single_user_specifier: '{user} approuve',
+      user_specifier: '{n} approbation de {users}|{n} approbation de {users}',
+      group_specifier: '{n} approbation de {groups}|{n} approbation de {groups}',
+      quorum_percentage_any_user: '{n}% d approbation de tous les usagers',
+      quorum_percentage_rule: '{n}% d approbation de {users}',
+      allowlisted_by_metadata: 'Adresse marquée avec {metadata}',
+      allowlisted: 'Adresse dans le carnet d adresses',
+      not: 'Not: {rule}',
+      allof: ' ET ',
+      anyof: ' OU ',
+      named_rule: 'Utiliser la règle d approbation: {name}',
     },
     specifier: {
       editpermission: 'Modifier les permissions',
@@ -1001,10 +1402,17 @@ export default {
       setdisasterrecovery: 'Définir la récupération après sinistre',
       callexternalcanister: 'Appeler un canister',
       createexternalcanister: 'Créer un canister',
+      addasset: 'Ajouter un actif',
+      editasset: 'Modifier un actif',
+      removeasset: 'Éffacer un actif',
+      addnamedrule: 'Ajouter une règle d approbation',
+      editnamedrule: 'Modifier une règle d approbation',
+      removenamedrule: 'Éffacer une règle d approbation',
     },
   },
   cycle_obtain_strategies: {
     disabled: 'Désactivé',
     mintfromnativetoken: 'Mint depuis le compte ICP',
+    withdrawfromcyclesledger: 'Retrait du grand livre des cycles',
   },
 };

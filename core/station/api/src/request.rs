@@ -1,23 +1,32 @@
 use super::{
-    EditAccountOperationInput, TimestampRfc3339, TransferOperationDTO, TransferOperationInput,
+    EditAccountOperationInput, MonitorExternalCanisterOperationDTO,
+    MonitorExternalCanisterOperationInput, TimestampRfc3339, TransferOperationDTO,
+    TransferOperationInput,
 };
 use crate::{
     AddAccountOperationDTO, AddAccountOperationInput, AddAddressBookEntryOperationDTO,
-    AddAddressBookEntryOperationInput, AddUserGroupOperationDTO, AddUserGroupOperationInput,
-    AddUserOperationDTO, AddUserOperationInput, CallExternalCanisterOperationDTO,
-    CallExternalCanisterOperationInput, ChangeExternalCanisterOperationDTO,
-    ChangeExternalCanisterOperationInput, ConfigureExternalCanisterOperationDTO,
-    ConfigureExternalCanisterOperationInput, CreateExternalCanisterOperationDTO,
-    CreateExternalCanisterOperationInput, DisplayUserDTO, EditAccountOperationDTO,
-    EditAddressBookEntryOperationDTO, EditAddressBookEntryOperationInput,
-    EditPermissionOperationDTO, EditPermissionOperationInput, EditUserGroupOperationDTO,
-    EditUserGroupOperationInput, EditUserOperationDTO, EditUserOperationInput,
-    FundExternalCanisterOperationDTO, FundExternalCanisterOperationInput,
+    AddAddressBookEntryOperationInput, AddAssetOperationDTO, AddAssetOperationInput,
+    AddNamedRuleOperationDTO, AddNamedRuleOperationInput, AddUserGroupOperationDTO,
+    AddUserGroupOperationInput, AddUserOperationDTO, AddUserOperationInput,
+    CallExternalCanisterOperationDTO, CallExternalCanisterOperationInput,
+    ChangeExternalCanisterOperationDTO, ChangeExternalCanisterOperationInput,
+    ConfigureExternalCanisterOperationDTO, ConfigureExternalCanisterOperationInput,
+    CreateExternalCanisterOperationDTO, CreateExternalCanisterOperationInput, DisplayUserDTO,
+    EditAccountOperationDTO, EditAddressBookEntryOperationDTO, EditAddressBookEntryOperationInput,
+    EditAssetOperationDTO, EditAssetOperationInput, EditNamedRuleOperationDTO,
+    EditNamedRuleOperationInput, EditPermissionOperationDTO, EditPermissionOperationInput,
+    EditUserGroupOperationDTO, EditUserGroupOperationInput, EditUserOperationDTO,
+    EditUserOperationInput, FundExternalCanisterOperationDTO, FundExternalCanisterOperationInput,
     ManageSystemInfoOperationDTO, ManageSystemInfoOperationInput, PaginationInput,
+    PruneExternalCanisterOperationDTO, PruneExternalCanisterOperationInput,
     RemoveAddressBookEntryOperationDTO, RemoveAddressBookEntryOperationInput,
-    RemoveUserGroupOperationDTO, RemoveUserGroupOperationInput, RequestEvaluationResultDTO,
-    RequestPolicyRuleDTO, RequestSpecifierDTO, SetDisasterRecoveryOperationDTO,
-    SetDisasterRecoveryOperationInput, SortDirection, SystemUpgradeOperationDTO,
+    RemoveAssetOperationDTO, RemoveAssetOperationInput, RemoveNamedRuleOperationDTO,
+    RemoveNamedRuleOperationInput, RemoveUserGroupOperationDTO, RemoveUserGroupOperationInput,
+    RequestEvaluationResultDTO, RequestPolicyRuleDTO, RequestSpecifierDTO,
+    RestoreExternalCanisterOperationDTO, RestoreExternalCanisterOperationInput,
+    SetDisasterRecoveryOperationDTO, SetDisasterRecoveryOperationInput,
+    SnapshotExternalCanisterOperationDTO, SnapshotExternalCanisterOperationInput, SortDirection,
+    SystemRestoreOperationDTO, SystemRestoreOperationInput, SystemUpgradeOperationDTO,
     SystemUpgradeOperationInput, UuidDTO,
 };
 use candid::{CandidType, Deserialize, Principal};
@@ -72,17 +81,28 @@ pub enum RequestOperationDTO {
     EditUserGroup(Box<EditUserGroupOperationDTO>),
     RemoveUserGroup(Box<RemoveUserGroupOperationDTO>),
     SystemUpgrade(Box<SystemUpgradeOperationDTO>),
+    SystemRestore(Box<SystemRestoreOperationDTO>),
     SetDisasterRecovery(Box<SetDisasterRecoveryOperationDTO>),
     ChangeExternalCanister(Box<ChangeExternalCanisterOperationDTO>),
     CreateExternalCanister(Box<CreateExternalCanisterOperationDTO>),
     ConfigureExternalCanister(Box<ConfigureExternalCanisterOperationDTO>),
     CallExternalCanister(Box<CallExternalCanisterOperationDTO>),
     FundExternalCanister(Box<FundExternalCanisterOperationDTO>),
+    MonitorExternalCanister(Box<MonitorExternalCanisterOperationDTO>),
+    SnapshotExternalCanister(Box<SnapshotExternalCanisterOperationDTO>),
+    RestoreExternalCanister(Box<RestoreExternalCanisterOperationDTO>),
+    PruneExternalCanister(Box<PruneExternalCanisterOperationDTO>),
     EditPermission(Box<EditPermissionOperationDTO>),
     AddRequestPolicy(Box<AddRequestPolicyOperationDTO>),
     EditRequestPolicy(Box<EditRequestPolicyOperationDTO>),
     RemoveRequestPolicy(Box<RemoveRequestPolicyOperationDTO>),
     ManageSystemInfo(Box<ManageSystemInfoOperationDTO>),
+    AddAsset(Box<AddAssetOperationDTO>),
+    EditAsset(Box<EditAssetOperationDTO>),
+    RemoveAsset(Box<RemoveAssetOperationDTO>),
+    AddNamedRule(Box<AddNamedRuleOperationDTO>),
+    EditNamedRule(Box<EditNamedRuleOperationDTO>),
+    RemoveNamedRule(Box<RemoveNamedRuleOperationDTO>),
 }
 
 #[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
@@ -99,17 +119,28 @@ pub enum RequestOperationInput {
     EditUserGroup(EditUserGroupOperationInput),
     RemoveUserGroup(RemoveUserGroupOperationInput),
     SystemUpgrade(SystemUpgradeOperationInput),
+    SystemRestore(SystemRestoreOperationInput),
     SetDisasterRecovery(SetDisasterRecoveryOperationInput),
     ChangeExternalCanister(ChangeExternalCanisterOperationInput),
     CreateExternalCanister(CreateExternalCanisterOperationInput),
     ConfigureExternalCanister(ConfigureExternalCanisterOperationInput),
     CallExternalCanister(CallExternalCanisterOperationInput),
     FundExternalCanister(FundExternalCanisterOperationInput),
+    MonitorExternalCanister(MonitorExternalCanisterOperationInput),
+    SnapshotExternalCanister(SnapshotExternalCanisterOperationInput),
+    RestoreExternalCanister(RestoreExternalCanisterOperationInput),
+    PruneExternalCanister(PruneExternalCanisterOperationInput),
     EditPermission(EditPermissionOperationInput),
     AddRequestPolicy(AddRequestPolicyOperationInput),
     EditRequestPolicy(EditRequestPolicyOperationInput),
     RemoveRequestPolicy(RemoveRequestPolicyOperationInput),
     ManageSystemInfo(ManageSystemInfoOperationInput),
+    AddAsset(AddAssetOperationInput),
+    EditAsset(EditAssetOperationInput),
+    RemoveAsset(RemoveAssetOperationInput),
+    AddNamedRule(AddNamedRuleOperationInput),
+    EditNamedRule(EditNamedRuleOperationInput),
+    RemoveNamedRule(RemoveNamedRuleOperationInput),
 }
 
 #[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
@@ -126,17 +157,28 @@ pub enum RequestOperationTypeDTO {
     EditUserGroup,
     RemoveUserGroup,
     SystemUpgrade,
+    SystemRestore,
     SetDisasterRecovery,
     ChangeExternalCanister,
     CreateExternalCanister,
     CallExternalCanister,
     FundExternalCanister,
+    MonitorExternalCanister,
+    SnapshotExternalCanister,
+    RestoreExternalCanister,
+    PruneExternalCanister,
     EditPermission,
     AddRequestPolicy,
     EditRequestPolicy,
     RemoveRequestPolicy,
     ManageSystemInfo,
     ConfigureExternalCanister,
+    AddAsset,
+    EditAsset,
+    RemoveAsset,
+    AddNamedRule,
+    EditNamedRule,
+    RemoveNamedRule,
 }
 
 #[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
@@ -153,10 +195,15 @@ pub enum ListRequestsOperationTypeDTO {
     EditUserGroup,
     RemoveUserGroup,
     SystemUpgrade,
+    SystemRestore,
     ChangeExternalCanister(Option<Principal>),
     CreateExternalCanister,
     CallExternalCanister(Option<Principal>),
     FundExternalCanister(Option<Principal>),
+    MonitorExternalCanister(Option<Principal>),
+    SnapshotExternalCanister(Option<Principal>),
+    RestoreExternalCanister(Option<Principal>),
+    PruneExternalCanister(Option<Principal>),
     EditPermission,
     AddRequestPolicy,
     EditRequestPolicy,
@@ -164,6 +211,12 @@ pub enum ListRequestsOperationTypeDTO {
     ManageSystemInfo,
     SetDisasterRecovery,
     ConfigureExternalCanister(Option<Principal>),
+    AddAsset,
+    EditAsset,
+    RemoveAsset,
+    AddNamedRule,
+    EditNamedRule,
+    RemoveNamedRule,
 }
 
 #[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
@@ -186,6 +239,8 @@ pub struct RequestDTO {
     pub status: RequestStatusDTO,
     pub expiration_dt: TimestampRfc3339,
     pub execution_plan: RequestExecutionScheduleDTO,
+    pub deduplication_key: Option<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
@@ -208,6 +263,20 @@ pub struct CreateRequestInput {
     pub title: Option<String>,
     pub summary: Option<String>,
     pub execution_plan: Option<RequestExecutionScheduleDTO>,
+    pub expiration_dt: Option<TimestampRfc3339>,
+    pub deduplication_key: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
+pub struct CancelRequestInput {
+    pub request_id: UuidDTO,
+    pub reason: Option<String>,
+}
+
+#[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
+pub struct CancelRequestResponse {
+    pub request: RequestDTO,
 }
 
 #[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
@@ -258,6 +327,8 @@ pub struct ListRequestsInput {
     pub sort_by: Option<ListRequestsSortBy>,
     pub only_approvable: bool,
     pub with_evaluation_results: bool,
+    pub deduplication_keys: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(CandidType, serde::Serialize, Deserialize, Debug, Clone)]
@@ -273,6 +344,7 @@ pub struct ListRequestsResponse {
 pub struct GetNextApprovableRequestInput {
     pub excluded_request_ids: Vec<UuidDTO>,
     pub operation_types: Option<Vec<ListRequestsOperationTypeDTO>>,
+    pub sort_by: Option<ListRequestsSortBy>,
 }
 
 pub type GetNextApprovableRequestResponse = Option<GetRequestResponse>;

@@ -10,6 +10,9 @@ export interface AppInitConfig {
   isProduction: boolean;
   buildMode: string;
   apiGatewayUrl: URL;
+  httpGatewayUrl: (canisterId: string) => URL;
+  derivationOrigin: string | undefined;
+  marketingSiteUrl?: string;
   locale: {
     default: string;
     supportedLocales: string[];
@@ -73,5 +76,14 @@ export enum CyclesUnit {
   Billion = 'BC',
   Million = 'MC',
   // Can be used to display cycles in the smallest unit.
-  Smallest = 'e8s',
+  Smallest = 'Cycles',
+}
+
+export enum TimeUnit {
+  Years = 'Y',
+  Months = 'M',
+  Days = 'D',
+  Hours = 'H',
+  Minutes = 'Min',
+  Seconds = 'Sec',
 }

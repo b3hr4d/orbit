@@ -1,6 +1,16 @@
 {
   "__ref_dfx": "dfx.json reference: https://internetcomputer.org/docs/current/references/dfx-json-reference/",
   "canisters": {
+    "cmc": {
+      "type": "custom",
+      "candid": "https://raw.githubusercontent.com/dfinity/ic/ee52ab3056cf5f39b09b08de70bdd20485c8b2dc/rs/nns/cmc/cmc.did",
+      "wasm": "https://download.dfinity.systems/ic/ee52ab3056cf5f39b09b08de70bdd20485c8b2dc/canisters/cycles-minting-canister.wasm.gz",
+      "remote": {
+        "id": {
+          "ic": "rkp4c-7iaaa-aaaaa-aaaca-cai"
+        }
+      }
+    },
     "icp_ledger": {
       "type": "custom",
       "candid": "https://raw.githubusercontent.com/dfinity/ic/d87954601e4b22972899e9957e800406a0a6b929/rs/rosetta-api/icp_ledger/ledger.did",
@@ -9,6 +19,10 @@
         "id": {
           "ic": "ryjl3-tyaaa-aaaaa-aaaba-cai"
         }
+      },
+      "declarations": {
+        "output": "apps/wallet/src/generated/icp_ledger",
+        "node_compatibility": true
       }
     },
     "icp_index": {
@@ -59,10 +73,59 @@
       "build": "./scripts/generate-wasm.sh station",
       "wasm": "./wasms/station.wasm.gz"
     },
+    "upgrader": {
+      "type": "custom",
+      "candid": "core/upgrader/api/spec.did",
+      "declarations": {
+        "output": "apps/wallet/src/generated/upgrader",
+        "node_compatibility": true
+      },
+      "build": "./scripts/generate-wasm.sh upgrader",
+      "wasm": "./wasms/upgrader.wasm.gz"
+    },
     "app_wallet": {
       "type": "assets",
-      "source": ["apps/wallet/dist/"],
+      "source": [
+        "apps/wallet/dist/"
+      ],
       "build": "pnpm --filter 'wallet-dapp' build"
+    },
+    "app_marketing": {
+      "type": "assets",
+      "source": [
+        "apps/marketing/dist/"
+      ],
+      "build": "pnpm --filter 'marketing-dapp' build"
+    },
+    "docs_portal": {
+      "type": "assets",
+      "source": [
+        "docs/dist/"
+      ],
+      "build": "pnpm --filter 'docs-portal' build"
+    },
+    "icrc1_index_canister": {
+      "type": "custom",
+      "candid": "https://raw.githubusercontent.com/dfinity/ic/d87954601e4b22972899e9957e800406a0a6b929/rs/rosetta-api/icrc1/index-ng/index-ng.did",
+      "wasm": "https://download.dfinity.systems/ic/d87954601e4b22972899e9957e800406a0a6b929/canisters/ic-icrc1-index-ng.wasm.gz",
+      "declarations": {
+        "output": "apps/wallet/src/generated/icrc1_index",
+        "node_compatibility": true
+      }
+    },
+    "icrc1_ledger_canister": {
+      "type": "custom",
+      "candid": "https://raw.githubusercontent.com/dfinity/ic/d87954601e4b22972899e9957e800406a0a6b929/rs/rosetta-api/icrc1/ledger/ledger.did",
+      "wasm": "https://download.dfinity.systems/ic/d87954601e4b22972899e9957e800406a0a6b929/canisters/ic-icrc1-ledger.wasm.gz",
+      "declarations": {
+        "output": "apps/wallet/src/generated/icrc1_ledger",
+        "node_compatibility": true
+      }
+    },
+    "wasm_chunk_store": {
+      "type": "assets",
+      "source": [],
+      "build": ""
     }
   },
   "defaults": {
@@ -73,28 +136,36 @@
   },
   "networks": {
     "production": {
-      "providers": ["https://icp0.io"],
+      "providers": [
+        "https://icp0.io"
+      ],
       "type": "persistent",
       "replica": {
         "subnet_type": "application"
       }
     },
     "staging": {
-      "providers": ["https://icp0.io"],
+      "providers": [
+        "https://icp0.io"
+      ],
       "type": "persistent",
       "replica": {
         "subnet_type": "application"
       }
     },
     "playground": {
-      "providers": ["https://icp0.io"],
+      "providers": [
+        "https://icp0.io"
+      ],
       "type": "persistent",
       "replica": {
         "subnet_type": "application"
       }
     },
     "testing": {
-      "providers": ["https://icp0.io"],
+      "providers": [
+        "https://icp0.io"
+      ],
       "type": "persistent",
       "replica": {
         "subnet_type": "application"
@@ -108,6 +179,6 @@
       }
     }
   },
-  "dfx": "0.23.0",
+  "dfx": "0.25.0",
   "version": 1
 }

@@ -1,42 +1,37 @@
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
-
+use super::{InstallCanister, LoggerService, INSTALL_CANISTER};
 use crate::{
     errors::UpgraderApiError,
+    get_disaster_recovery, get_target_canister,
     model::{
+        Account, AdminUser, Asset, DisasterRecovery, DisasterRecoveryCommittee,
         DisasterRecoveryInProgressLog, DisasterRecoveryResultLog, DisasterRecoveryStartLog,
-        LogEntryType, RequestDisasterRecoveryLog, SetAccountsLog, SetCommitteeLog,
+        LogEntryType, MultiAssetAccount, RecoveryEvaluationResult, RecoveryFailure, RecoveryResult,
+        RecoveryStatus, RequestDisasterRecoveryLog, RequestDisasterRecoveryOperationLog,
+        SetAccountsAndAssetsLog, SetAccountsLog, SetCommitteeLog, StationRecoveryRequest,
+        StationRecoveryRequestOperation, StationRecoveryRequestOperationFootprint,
+        StationRecoveryRequestPruneOperation,
     },
     services::LOGGER_SERVICE,
+    set_disaster_recovery,
     upgrader_ic_cdk::{api::time, spawn},
 };
+
 use candid::Principal;
-use ic_stable_structures::memory_manager::MemoryId;
 use lazy_static::lazy_static;
-use orbit_essentials::{api::ServiceResult, utils::sha256_hash};
-
-use crate::{
-    model::{
-        Account, AdminUser, DisasterRecovery, DisasterRecoveryCommittee, InstallMode,
-        RecoveryEvaluationResult, RecoveryFailure, RecoveryResult, RecoveryStatus,
-        StationRecoveryRequest,
-    },
-    StableValue, MEMORY_ID_DISASTER_RECOVERY, MEMORY_MANAGER, TARGET_CANISTER_ID,
+use orbit_essentials::api::ServiceResult;
+use orbit_essentials::cdk::api::canister_version;
+use orbit_essentials::cdk::api::management_canister::main::{
+    clear_chunk_store, delete_canister_snapshot, list_canister_snapshots, load_canister_snapshot,
+    take_canister_snapshot, uninstall_code, CanisterIdRecord, ClearChunkStoreArgument,
+    DeleteCanisterSnapshotArgs, LoadCanisterSnapshotArgs, Snapshot, TakeCanisterSnapshotArgs,
 };
-
-use super::{InstallCanister, LoggerService, INSTALL_CANISTER};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 pub const DISASTER_RECOVERY_REQUEST_EXPIRATION_NS: u64 = 60 * 60 * 24 * 7 * 1_000_000_000; // 1 week
 pub const DISASTER_RECOVERY_IN_PROGESS_EXPIRATION_NS: u64 = 60 * 60 * 1_000_000_000; // 1 hour
-
-thread_local! {
-
-    static STORAGE: RefCell<StableValue<DisasterRecovery>> = RefCell::new(
-        StableValue::init(
-            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(MEMORY_ID_DISASTER_RECOVERY))),
-        )
-    );
-
-}
 
 lazy_static! {
     pub static ref DISASTER_RECOVERY_SERVICE: Arc<DisasterRecoveryService> =
@@ -82,11 +77,11 @@ pub struct DisasterRecoveryStorage {}
 
 impl DisasterRecoveryStorage {
     pub fn get(&self) -> DisasterRecovery {
-        STORAGE.with(|storage| storage.borrow().get(&()).unwrap_or_default())
+        get_disaster_recovery()
     }
 
     fn set(&self, value: DisasterRecovery) {
-        STORAGE.with(|storage| storage.borrow_mut().insert((), value));
+        set_disaster_recovery(value);
     }
 }
 
@@ -98,25 +93,45 @@ pub struct DisasterRecoveryService {
 }
 
 impl DisasterRecoveryService {
-    pub fn set_committee(&self, committee: DisasterRecoveryCommittee) -> ServiceResult {
-        let mut value = self.storage.get();
-
+    fn ensure_not_in_progress(
+        logger: &Arc<LoggerService>,
+        value: &mut DisasterRecovery,
+        operation: &str,
+    ) -> ServiceResult {
         if let RecoveryStatus::InProgress { since } = &value.recovery_status {
             let log = DisasterRecoveryInProgressLog {
-                operation: "set_committee".to_owned(),
+                operation: operation.to_owned(),
             };
             if since + DISASTER_RECOVERY_IN_PROGESS_EXPIRATION_NS > time() {
-                self.logger
-                    .log(LogEntryType::DisasterRecoveryInProgress(log));
+                logger.log(LogEntryType::DisasterRecoveryInProgress(log));
                 return Err(UpgraderApiError::DisasterRecoveryInProgress.into());
             }
 
-            self.logger
-                .log(LogEntryType::DisasterRecoveryInProgressExpired(log));
+            logger.log(LogEntryType::DisasterRecoveryInProgressExpired(log));
             value.recovery_status = RecoveryStatus::Idle;
         }
 
+        Ok(())
+    }
+
+    pub fn set_committee(&self, committee: DisasterRecoveryCommittee) -> ServiceResult {
+        let mut value = self.storage.get();
+
+        Self::ensure_not_in_progress(&self.logger, &mut value, "set_committee")?;
+
+        // Ensure committee is not empty due to some error
+        if committee.users.is_empty() {
+            return Err(UpgraderApiError::EmptyCommittee.into());
+        }
+
         value.committee = Some(committee.clone());
+
+        // only retain recovery requests from committee members
+        // who are in the new committee
+        let committee_set: HashSet<_> = committee.users.iter().map(|user| user.id).collect();
+        value
+            .recovery_requests
+            .retain(|request| committee_set.contains(&request.user_id));
 
         self.storage.set(value);
 
@@ -129,22 +144,10 @@ impl DisasterRecoveryService {
     pub fn set_accounts(&self, accounts: Vec<Account>) -> ServiceResult {
         let mut value = self.storage.get();
 
-        if let RecoveryStatus::InProgress { since } = &value.recovery_status {
-            let log = DisasterRecoveryInProgressLog {
-                operation: "set_accounts".to_owned(),
-            };
-            if since + DISASTER_RECOVERY_IN_PROGESS_EXPIRATION_NS > time() {
-                self.logger
-                    .log(LogEntryType::DisasterRecoveryInProgress(log));
-                return Err(UpgraderApiError::DisasterRecoveryInProgress.into());
-            }
+        Self::ensure_not_in_progress(&self.logger, &mut value, "set_accounts")?;
 
-            self.logger
-                .log(LogEntryType::DisasterRecoveryInProgressExpired(log));
-            value.recovery_status = RecoveryStatus::Idle;
-        }
+        value.accounts.clone_from(&accounts);
 
-        value.accounts = accounts.clone();
         self.storage.set(value);
 
         self.logger
@@ -153,8 +156,40 @@ impl DisasterRecoveryService {
         Ok(())
     }
 
+    pub fn set_accounts_and_assets(
+        &self,
+        multi_asset_accounts: Vec<MultiAssetAccount>,
+        assets: Vec<Asset>,
+    ) -> ServiceResult {
+        let mut value = self.storage.get();
+
+        Self::ensure_not_in_progress(&self.logger, &mut value, "set_accounts_and_assets")?;
+
+        value.multi_asset_accounts.clone_from(&multi_asset_accounts);
+        value.assets.clone_from(&assets);
+
+        self.storage.set(value);
+
+        self.logger.log(LogEntryType::SetAccountsAndAssets(
+            SetAccountsAndAssetsLog {
+                multi_asset_accounts,
+                assets,
+            },
+        ));
+
+        Ok(())
+    }
+
     pub fn get_accounts(&self) -> Vec<Account> {
         self.storage.get().accounts
+    }
+
+    pub fn get_multi_asset_accounts(&self) -> Vec<MultiAssetAccount> {
+        self.storage.get().multi_asset_accounts
+    }
+
+    pub fn get_assets(&self) -> Vec<Asset> {
+        self.storage.get().assets
     }
 
     pub fn get_committee(&self) -> Option<DisasterRecoveryCommittee> {
@@ -170,7 +205,7 @@ impl DisasterRecoveryService {
             .get()
             .committee
             .as_ref()
-            .map_or(false, |committee| {
+            .is_some_and(|committee| {
                 committee
                     .users
                     .iter()
@@ -206,11 +241,18 @@ impl DisasterRecoveryService {
             now < expires_at
         });
 
-        let mut submissions: HashMap<(Vec<u8>, Vec<u8>), usize> = Default::default();
+        // Remove requests from users who are not in the committee
+        let committee_set: HashSet<_> = committee.users.iter().map(|user| user.id).collect();
+        storage
+            .recovery_requests
+            .retain(|request| committee_set.contains(&request.user_id));
+
+        let mut submissions: HashMap<StationRecoveryRequestOperationFootprint, usize> =
+            Default::default();
 
         for request in storage.recovery_requests.iter() {
-            let key = (request.wasm_sha256.clone(), request.arg.clone());
-            let entry = submissions.entry(key).or_insert(0);
+            let request_operation_footprint = (&request.operation).into();
+            let entry = submissions.entry(request_operation_footprint).or_insert(0);
 
             *entry += 1;
 
@@ -228,6 +270,107 @@ impl DisasterRecoveryService {
         RecoveryEvaluationResult::Unmet
     }
 
+    async fn try_recovery(
+        installer: Arc<dyn InstallCanister>,
+        station_canister_id: Principal,
+        operation: StationRecoveryRequestOperation,
+    ) -> Result<(), String> {
+        match operation {
+            StationRecoveryRequestOperation::InstallCode(install_code) => {
+                installer.stop(station_canister_id).await?;
+
+                installer
+                    .install(
+                        station_canister_id,
+                        install_code.wasm_module,
+                        install_code.wasm_module_extra_chunks,
+                        install_code.arg,
+                        install_code.install_mode,
+                    )
+                    .await?;
+
+                installer.start(station_canister_id).await?;
+
+                Ok(())
+            }
+            StationRecoveryRequestOperation::Snapshot(snapshot) => {
+                if let Err(reason) = installer.stop(station_canister_id).await {
+                    if !snapshot.force {
+                        return Err(reason);
+                    }
+                }
+
+                let snapshot_args = TakeCanisterSnapshotArgs {
+                    canister_id: station_canister_id,
+                    replace_snapshot: snapshot.replace_snapshot,
+                };
+                take_canister_snapshot(snapshot_args)
+                    .await
+                    .map_err(|(_, err)| err)?;
+
+                installer.start(station_canister_id).await?;
+
+                Ok(())
+            }
+            StationRecoveryRequestOperation::Restore(snapshot) => {
+                installer.stop(station_canister_id).await?;
+
+                let snapshot_args = LoadCanisterSnapshotArgs {
+                    canister_id: station_canister_id,
+                    snapshot_id: snapshot.snapshot_id,
+                    sender_canister_version: Some(canister_version()),
+                };
+                load_canister_snapshot(snapshot_args)
+                    .await
+                    .map_err(|(_, err)| err)?;
+
+                installer.start(station_canister_id).await?;
+
+                Ok(())
+            }
+            StationRecoveryRequestOperation::Prune(
+                StationRecoveryRequestPruneOperation::Snapshot(snapshot_id),
+            ) => {
+                let snapshot_args = DeleteCanisterSnapshotArgs {
+                    canister_id: station_canister_id,
+                    snapshot_id,
+                };
+                delete_canister_snapshot(snapshot_args)
+                    .await
+                    .map_err(|(_, err)| err)?;
+
+                Ok(())
+            }
+            StationRecoveryRequestOperation::Prune(
+                StationRecoveryRequestPruneOperation::ChunkStore,
+            ) => {
+                let canister_id_record = ClearChunkStoreArgument {
+                    canister_id: station_canister_id,
+                };
+                clear_chunk_store(canister_id_record)
+                    .await
+                    .map_err(|(_, err)| err)?;
+
+                Ok(())
+            }
+            StationRecoveryRequestOperation::Prune(StationRecoveryRequestPruneOperation::State) => {
+                let canister_id_record = CanisterIdRecord {
+                    canister_id: station_canister_id,
+                };
+                uninstall_code(canister_id_record)
+                    .await
+                    .map_err(|(_, err)| err)?;
+
+                Ok(())
+            }
+            StationRecoveryRequestOperation::Start => {
+                installer.start(station_canister_id).await?;
+
+                Ok(())
+            }
+        }
+    }
+
     async fn do_recovery(
         storage: DisasterRecoveryStorage,
         installer: Arc<dyn InstallCanister>,
@@ -236,37 +379,18 @@ impl DisasterRecoveryService {
     ) {
         let mut value = storage.get();
 
+        let operation_log: RequestDisasterRecoveryOperationLog = (&request.operation).into();
         logger.log(LogEntryType::DisasterRecoveryStart(
             DisasterRecoveryStartLog {
-                wasm_sha256: hex::encode(&request.wasm_sha256),
-                arg_sha256: hex::encode(&request.arg_sha256),
-                install_mode: request.install_mode.to_string(),
+                operation: operation_log,
             },
         ));
 
-        if let RecoveryStatus::InProgress { since } = &value.recovery_status {
-            let log = DisasterRecoveryInProgressLog {
-                operation: "do_recovery".to_owned(),
-            };
-
-            if since + DISASTER_RECOVERY_IN_PROGESS_EXPIRATION_NS > time() {
-                logger.log(LogEntryType::DisasterRecoveryInProgress(log));
-                return;
-            }
-
-            logger.log(LogEntryType::DisasterRecoveryInProgressExpired(log));
-            value.recovery_status = RecoveryStatus::Idle;
+        if Self::ensure_not_in_progress(&logger, &mut value, "do_recovery").is_err() {
+            return;
         }
 
-        let Some(station_canister_id) =
-            TARGET_CANISTER_ID.with(|id| id.borrow().get(&()).map(|id| id.0))
-        else {
-            value.last_recovery_result = Some(RecoveryResult::Failure(RecoveryFailure {
-                reason: "Station canister ID not set".to_string(),
-            }));
-            storage.set(value);
-            return;
-        };
+        let station_canister_id = get_target_canister();
 
         value.recovery_status = RecoveryStatus::InProgress { since: time() };
         storage.set(value);
@@ -277,36 +401,13 @@ impl DisasterRecoveryService {
             logger: logger.clone(),
         };
 
-        // only stop for upgrade
-        if request.install_mode == InstallMode::Upgrade {
-            if let Err(err) = installer.stop(station_canister_id).await {
-                ic_cdk::print(err);
-            }
-        }
-
-        match installer
-            .install(
-                station_canister_id,
-                request.wasm_module,
-                request.wasm_module_extra_chunks,
-                request.arg,
-                request.install_mode,
-            )
-            .await
+        if let Err(reason) =
+            Self::try_recovery(installer.clone(), station_canister_id, request.operation).await
         {
-            Ok(_) => {
-                releaser.result = Some(RecoveryResult::Success);
-            }
-            Err(reason) => {
-                releaser.result = Some(RecoveryResult::Failure(RecoveryFailure { reason }));
-            }
-        }
-
-        // only start for upgrade
-        if request.install_mode == InstallMode::Upgrade {
-            if let Err(err) = installer.start(station_canister_id).await {
-                ic_cdk::print(err);
-            }
+            let _ = installer.start(station_canister_id).await;
+            releaser.result = Some(RecoveryResult::Failure(RecoveryFailure { reason }));
+        } else {
+            releaser.result = Some(RecoveryResult::Success);
         }
     }
 
@@ -318,20 +419,12 @@ impl DisasterRecoveryService {
         let mut value = self.storage.get();
 
         if let Some(committee_member) = self.get_committee_member(caller) {
-            let wasm_sha256 = if let Some(ref module_extra_chunks) = request.module_extra_chunks {
-                module_extra_chunks.wasm_module_hash.clone()
-            } else {
-                sha256_hash(&request.module)
-            };
+            let operation: StationRecoveryRequestOperation = request.into();
+            let operation_log: RequestDisasterRecoveryOperationLog = (&operation).into();
             let recovery_request = StationRecoveryRequest {
                 user_id: committee_member.id,
-                wasm_sha256,
-                wasm_module: request.module,
-                wasm_module_extra_chunks: request.module_extra_chunks,
-                arg_sha256: sha256_hash(&request.arg),
-                arg: request.arg,
+                operation,
                 submitted_at: time(),
-                install_mode: request.install_mode.into(),
             };
 
             // check if user had previous recovery request
@@ -350,9 +443,7 @@ impl DisasterRecoveryService {
             self.logger.log(LogEntryType::RequestDisasterRecovery(
                 RequestDisasterRecoveryLog {
                     user: committee_member,
-                    wasm_sha256: hex::encode(&recovery_request.wasm_sha256),
-                    arg_sha256: hex::encode(&recovery_request.arg_sha256),
-                    install_mode: recovery_request.install_mode.to_string(),
+                    operation: operation_log,
                 },
             ));
         }
@@ -369,10 +460,21 @@ impl DisasterRecoveryService {
             });
         }
     }
+
+    pub async fn canister_snapshots(&self) -> Result<Vec<Snapshot>, String> {
+        let station_canister_id = get_target_canister();
+        let canister_id_record = CanisterIdRecord {
+            canister_id: station_canister_id,
+        };
+        list_canister_snapshots(canister_id_record)
+            .await
+            .map(|res| res.0)
+            .map_err(|(_, err)| err)
+    }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::DISASTER_RECOVERY_SERVICE;
     use async_trait::async_trait;
     use candid::Principal;
@@ -384,14 +486,14 @@ mod test {
 
     use crate::{
         model::{
-            test::{mock_accounts, mock_committee},
+            tests::{mock_accounts, mock_assets, mock_committee, mock_multi_asset_accounts},
             InstallMode, RecoveryEvaluationResult, RecoveryResult, RecoveryStatus,
-            StationRecoveryRequest,
+            StationRecoveryRequest, StationRecoveryRequestInstallCodeOperation,
         },
         services::{
-            DisasterRecoveryService, DisasterRecoveryStorage, InstallCanister, LoggerService,
+            disaster_recovery::StationRecoveryRequestOperation, DisasterRecoveryService,
+            DisasterRecoveryStorage, InstallCanister, LoggerService,
         },
-        StorablePrincipal, TARGET_CANISTER_ID,
     };
 
     #[derive(Default)]
@@ -484,24 +586,28 @@ mod test {
         // non committee member
         dr.request_recovery(
             Principal::from_slice(&[0; 29]),
-            upgrader_api::RequestDisasterRecoveryInput {
-                arg: vec![1, 2, 3],
-                module: vec![4, 5, 6],
-                module_extra_chunks: None,
-                install_mode: upgrader_api::InstallMode::Upgrade,
-            },
+            upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+                upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+                    arg: vec![1, 2, 3],
+                    module: vec![4, 5, 6],
+                    module_extra_chunks: None,
+                    install_mode: upgrader_api::InstallMode::Upgrade,
+                },
+            ),
         );
         assert!(dr.storage.get().recovery_requests.is_empty());
 
         // committee member
         dr.request_recovery(
             Principal::from_slice(&[1; 29]),
-            upgrader_api::RequestDisasterRecoveryInput {
-                arg: vec![1, 2, 3],
-                module: vec![4, 5, 6],
-                module_extra_chunks: None,
-                install_mode: upgrader_api::InstallMode::Upgrade,
-            },
+            upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+                upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+                    arg: vec![1, 2, 3],
+                    module: vec![4, 5, 6],
+                    module_extra_chunks: None,
+                    install_mode: upgrader_api::InstallMode::Upgrade,
+                },
+            ),
         );
 
         assert!(dr.storage.get().recovery_requests.len() == 1);
@@ -512,12 +618,14 @@ mod test {
         // committee member to submit different request
         dr.request_recovery(
             Principal::from_slice(&[2; 29]),
-            upgrader_api::RequestDisasterRecoveryInput {
-                arg: vec![0, 0, 0],
-                module: vec![4, 5, 6],
-                module_extra_chunks: None,
-                install_mode: upgrader_api::InstallMode::Upgrade,
-            },
+            upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+                upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+                    arg: vec![0, 0, 0],
+                    module: vec![4, 5, 6],
+                    module_extra_chunks: None,
+                    install_mode: upgrader_api::InstallMode::Upgrade,
+                },
+            ),
         );
 
         assert!(dr.storage.get().recovery_requests.len() == 2);
@@ -526,22 +634,27 @@ mod test {
         // 3rd committee member to submit same request as first
         dr.request_recovery(
             Principal::from_slice(&[3; 29]),
-            upgrader_api::RequestDisasterRecoveryInput {
-                arg: vec![1, 2, 3],
-                module: vec![4, 5, 6],
-                module_extra_chunks: None,
-                install_mode: upgrader_api::InstallMode::Upgrade,
-            },
+            upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+                upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+                    arg: vec![1, 2, 3],
+                    module: vec![4, 5, 6],
+                    module_extra_chunks: None,
+                    install_mode: upgrader_api::InstallMode::Upgrade,
+                },
+            ),
         );
 
         assert!(dr.storage.get().recovery_requests.len() == 3);
 
         // evaluation results in met DR condition
         match dr.evaluate_requests() {
-            RecoveryEvaluationResult::Met(request) => {
-                assert_eq!(request.arg, vec![1, 2, 3]);
-                assert_eq!(request.wasm_module, vec![4, 5, 6]);
-            }
+            RecoveryEvaluationResult::Met(request) => match request.operation {
+                StationRecoveryRequestOperation::InstallCode(install_code) => {
+                    assert_eq!(install_code.arg, vec![1, 2, 3]);
+                    assert_eq!(install_code.wasm_module, vec![4, 5, 6]);
+                }
+                _ => panic!("Unexpected operation"),
+            },
             _ => panic!("Unexpected result"),
         };
 
@@ -551,21 +664,21 @@ mod test {
 
     #[tokio::test]
     async fn test_do_recovery() {
-        TARGET_CANISTER_ID.with(|id| {
-            id.borrow_mut()
-                .insert((), StorablePrincipal(Principal::anonymous()));
-        });
-
         let storage: DisasterRecoveryStorage = Default::default();
         let logger = Arc::new(LoggerService::default());
+        let operation = StationRecoveryRequestOperation::InstallCode(
+            StationRecoveryRequestInstallCodeOperation {
+                install_mode: InstallMode::Reinstall,
+                wasm_module: vec![1, 2, 3],
+                wasm_module_extra_chunks: None,
+                wasm_sha256: vec![4, 5, 6],
+                arg: vec![7, 8, 9],
+                arg_sha256: vec![10, 11, 12],
+            },
+        );
         let recovery_request = StationRecoveryRequest {
             user_id: [1; 16],
-            wasm_module: vec![1, 2, 3],
-            wasm_module_extra_chunks: None,
-            wasm_sha256: vec![4, 5, 6],
-            install_mode: InstallMode::Reinstall,
-            arg: vec![7, 8, 9],
-            arg_sha256: vec![10, 11, 12],
+            operation,
             submitted_at: 0,
         };
 
@@ -632,60 +745,22 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_failing_do_recovery_with_no_target_canister_id() {
-        // setup: TARGET_CANISTER_ID is not set, so recovery should fail
-
-        let storage: DisasterRecoveryStorage = Default::default();
-        let logger = Arc::new(LoggerService::default());
-        let recovery_request = StationRecoveryRequest {
-            user_id: [1; 16],
-            wasm_module: vec![1, 2, 3],
-            wasm_module_extra_chunks: None,
-            wasm_sha256: vec![4, 5, 6],
-            install_mode: InstallMode::Reinstall,
-            arg: vec![7, 8, 9],
-            arg_sha256: vec![10, 11, 12],
-            submitted_at: 0,
-        };
-
-        let installer = Arc::new(TestInstaller::default());
-
-        DisasterRecoveryService::do_recovery(
-            storage.clone(),
-            installer.clone(),
-            logger.clone(),
-            recovery_request.clone(),
-        )
-        .await;
-
-        assert!(matches!(
-            storage.get().last_recovery_result,
-            Some(RecoveryResult::Failure(_))
-        ));
-
-        assert!(matches!(
-            storage.get().recovery_status,
-            RecoveryStatus::Idle
-        ));
-    }
-
-    #[tokio::test]
     async fn test_failing_do_recovery_with_panicking_install() {
-        TARGET_CANISTER_ID.with(|id| {
-            id.borrow_mut()
-                .insert((), StorablePrincipal(Principal::anonymous()));
-        });
-
         let storage: DisasterRecoveryStorage = Default::default();
         let logger = Arc::new(LoggerService::default());
+        let operation = StationRecoveryRequestOperation::InstallCode(
+            StationRecoveryRequestInstallCodeOperation {
+                install_mode: InstallMode::Reinstall,
+                wasm_module: vec![1, 2, 3],
+                wasm_module_extra_chunks: None,
+                wasm_sha256: vec![4, 5, 6],
+                arg: vec![7, 8, 9],
+                arg_sha256: vec![10, 11, 12],
+            },
+        );
         let recovery_request = StationRecoveryRequest {
             user_id: [1; 16],
-            wasm_module: vec![1, 2, 3],
-            wasm_module_extra_chunks: None,
-            wasm_sha256: vec![4, 5, 6],
-            install_mode: InstallMode::Reinstall,
-            arg: vec![7, 8, 9],
-            arg_sha256: vec![10, 11, 12],
+            operation,
             submitted_at: 0,
         };
 
@@ -749,7 +824,19 @@ mod test {
         storage.set(value);
 
         let error = DISASTER_RECOVERY_SERVICE
+            .set_accounts_and_assets(mock_multi_asset_accounts(), mock_assets())
+            .expect_err("Setting accounts and assets during recovery should fail");
+
+        assert_eq!(error.code, "DISASTER_RECOVERY_IN_PROGRESS".to_string(),);
+
+        let error = DISASTER_RECOVERY_SERVICE
             .set_accounts(mock_accounts())
+            .expect_err("Setting accounts during recovery should fail");
+
+        assert_eq!(error.code, "DISASTER_RECOVERY_IN_PROGRESS".to_string(),);
+
+        let error = DISASTER_RECOVERY_SERVICE
+            .set_committee(mock_committee())
             .expect_err("Setting committee during recovery should fail");
 
         assert_eq!(error.code, "DISASTER_RECOVERY_IN_PROGRESS".to_string(),);

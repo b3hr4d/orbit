@@ -13,40 +13,42 @@
       </thead>
       <tbody>
         <tr v-for="(item, idx) in model" :key="idx">
-          <td class="px-0 py-2">
-            <VTextField
-              v-model="item.key"
-              :readonly="props.readonly.value"
-              :disabled="props.disabled.value"
-              variant="filled"
-              density="compact"
-              :rules="[requiredRule]"
-              hide-details
-            />
-          </td>
-          <td class="px-1">
-            <VTextField
-              v-model="item.value"
-              :readonly="props.readonly.value"
-              :disabled="props.disabled.value"
-              variant="filled"
-              density="compact"
-              hide-details
-            />
-          </td>
-          <td v-if="!props.disabled.value && !props.readonly.value">
-            <div class="d-flex align-center justify-end">
-              <VBtn
-                size="small"
-                variant="text"
+          <template v-if="!hideKeys.includes(item.key)">
+            <td class="py-2">
+              <VTextField
+                v-model="item.key"
+                :readonly="props.readonly.value"
                 :disabled="props.disabled.value"
-                :icon="mdiTrashCanOutline"
-                @click="remove(idx)"
+                :variant="props.readonly.value ? 'plain' : 'filled'"
+                density="compact"
+                :rules="[requiredRule]"
+                hide-details
               />
-            </div>
-          </td>
+            </td>
+            <td>
+              <VTextField
+                v-model="item.value"
+                :readonly="props.readonly.value"
+                :disabled="props.disabled.value"
+                :variant="props.readonly.value ? 'plain' : 'filled'"
+                density="compact"
+                hide-details
+              />
+            </td>
+            <td v-if="!props.disabled.value && !props.readonly.value">
+              <div class="d-flex align-center justify-end">
+                <VBtn
+                  size="small"
+                  variant="text"
+                  :disabled="props.disabled.value"
+                  :icon="mdiTrashCanOutline"
+                  @click="remove(idx)"
+                />
+              </div>
+            </td>
+          </template>
         </tr>
-        <tr>
+        <tr v-if="!props.readonly.value && !props.disabled.value">
           <td class="px-0" colspan="3">
             <VBtn
               size="small"
@@ -80,6 +82,7 @@ const input = withDefaults(
     density?: 'comfortable' | 'compact';
     readonly?: boolean;
     disabled?: boolean;
+    hideKeys?: string[];
   }>(),
   {
     modelValue: () => [],
@@ -87,6 +90,7 @@ const input = withDefaults(
     density: 'comfortable',
     readonly: false,
     disabled: false,
+    hideKeys: () => [],
   },
 );
 

@@ -2,27 +2,34 @@ use crate::setup::{
     get_canister_wasm, setup_new_env, setup_new_env_with_config, WALLET_ADMIN_USER,
 };
 use crate::utils::{
-    add_user, advance_time_to_burn_cycles, await_station_healthy, execute_request,
+    add_user, advance_time_to_burn_cycles, await_station_healthy, canister_status, execute_request,
     get_account_read_permission, get_account_transfer_permission, get_account_update_permission,
-    get_core_canister_health_status, get_system_info, get_upgrader_disaster_recovery,
-    get_upgrader_logs, get_user, set_disaster_recovery, upload_canister_chunks_to_asset_canister,
-    user_test_id, NNS_ROOT_CANISTER_ID,
+    get_core_canister_health_status, get_disaster_recovery_accounts,
+    get_disaster_recovery_accounts_and_assets, get_disaster_recovery_committee,
+    get_disaster_recovery_state, get_icp_asset, get_system_info, get_upgrader_disaster_recovery,
+    get_upgrader_logs, get_user, request_disaster_recovery, set_disaster_recovery,
+    set_disaster_recovery_accounts, set_disaster_recovery_accounts_and_assets,
+    set_disaster_recovery_committee, upload_canister_chunks_to_asset_canister, user_test_id,
+    ADMIN_GROUP_ID, NNS_ROOT_CANISTER_ID,
 };
 use crate::TestEnv;
-use candid::{Encode, Principal};
+use candid::{CandidType, Encode, Principal};
+use ic_management_canister_types::CanisterStatusType;
 use orbit_essentials::api::ApiResult;
-use orbit_essentials::utils::sha256_hash;
+use orbit_essentials::utils::{sha256_hash, timestamp_to_rfc3339};
 use pocket_ic::{query_candid_as, update_candid_as, PocketIc};
+use serde::Deserialize;
 use station_api::{
-    AddAccountOperationInput, AllowDTO, DisasterRecoveryCommitteeDTO, HealthStatus,
-    ListAccountsResponse, RequestOperationDTO, RequestOperationInput, RequestPolicyRuleDTO,
-    SetDisasterRecoveryOperationInput, SystemInit, SystemInstall, SystemUpgrade,
+    AccountDTO, AddAccountOperationInput, AllowDTO, DisasterRecoveryCommitteeDTO,
+    EditUserOperationInput, HealthStatus, ListAccountsResponse, RequestOperationDTO,
+    RequestOperationInput, RequestPolicyRuleDTO, SetDisasterRecoveryOperationInput, SystemInit,
+    SystemInstall, SystemUpgrade, UserIdentityInput,
 };
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use upgrader_api::{
-    Account, AdminUser, DisasterRecoveryCommittee, GetDisasterRecoveryAccountsResponse,
-    GetDisasterRecoveryCommitteeResponse, SetDisasterRecoveryAccountsInput,
-    SetDisasterRecoveryCommitteeInput,
+    Account, AdminUser, Asset, DisasterRecoveryCommittee, MultiAssetAccount, RecoveryResult,
+    RecoveryStatus, StationRecoveryRequest,
 };
 use uuid::Uuid;
 
@@ -86,133 +93,94 @@ fn successful_disaster_recovery_sync() {
 
     let upgrader_id = system_info.upgrader_id;
 
-    let args: SetDisasterRecoveryCommitteeInput = SetDisasterRecoveryCommitteeInput {
-        committee: DisasterRecoveryCommittee {
-            quorum: 1,
-            users: vec![
-                AdminUser {
-                    id: Uuid::new_v4().hyphenated().to_string(),
-                    name: "user_1".to_owned(),
-                    identities: vec![Principal::from_slice(&[0])],
-                },
-                AdminUser {
-                    id: Uuid::new_v4().hyphenated().to_string(),
-                    name: "user_2".to_owned(),
-                    identities: vec![Principal::from_slice(&[1])],
-                },
-            ],
+    let quorum = 1;
+    let users = vec![
+        AdminUser {
+            id: Uuid::new_v4().hyphenated().to_string(),
+            name: "user_1".to_owned(),
+            identities: vec![Principal::from_slice(&[0])],
         },
-    };
+        AdminUser {
+            id: Uuid::new_v4().hyphenated().to_string(),
+            name: "user_2".to_owned(),
+            identities: vec![Principal::from_slice(&[1])],
+        },
+    ];
+    let committee = DisasterRecoveryCommittee { quorum, users };
 
     // non-controller can't set disaster recovery committee
-    let res: (ApiResult,) = update_candid_as(
+    let err = set_disaster_recovery_committee(
         &env,
         upgrader_id,
         Principal::from_slice(&[1]),
-        "set_disaster_recovery_committee",
-        (args.clone(),),
+        committee.clone(),
     )
-    .expect("Failed update call to set disaster recovery committee");
-    let err = res
-        .0
-        .expect_err("Non-controller should not be able to set disaster recovery committee");
+    .expect_err("Non-controller should not be able to set disaster recovery committee");
     assert!(err.code == "NOT_CONTROLLER");
 
     // controller can set disaster recovery committee
-    let res: (ApiResult,) = update_candid_as(
-        &env,
-        upgrader_id,
-        canister_ids.station,
-        "set_disaster_recovery_committee",
-        (args,),
-    )
-    .expect("Failed update call to set disaster recovery committee");
-    res.0.expect("Failed to set disaster recovery committee");
+    set_disaster_recovery_committee(&env, upgrader_id, canister_ids.station, committee)
+        .expect("Failed to set disaster recovery committee");
 
-    let res: (ApiResult<GetDisasterRecoveryCommitteeResponse>,) = query_candid_as(
-        &env,
-        upgrader_id,
-        canister_ids.station,
-        "get_disaster_recovery_committee",
-        ((),),
-    )
-    .expect("Failed query call to get disaster recovery committee");
-
-    let maybe_admins = res
-        .0
-        .expect("Failed to get disaster recovery committee")
-        .committee;
-
-    let admins = maybe_admins.expect("No committee found");
+    let admins = get_disaster_recovery_committee(&env, upgrader_id, canister_ids.station)
+        .expect("No committee found");
 
     assert_eq!(admins.quorum, 1);
     assert_eq!(admins.users.len(), 2);
     assert_eq!(admins.users[0].name, "user_1");
     assert_eq!(admins.users[1].name, "user_2");
 
-    let args = SetDisasterRecoveryAccountsInput {
-        accounts: vec![
-            Account {
-                id: Uuid::from_bytes([0; 16]).hyphenated().to_string(),
-                blockchain: "icp".to_owned(),
-                address: "abc".to_owned(),
-                standard: "native".to_owned(),
-                symbol: "ICP".to_owned(),
-                decimals: 8,
-                name: "Main Account".to_owned(),
-                metadata: vec![],
-            },
-            Account {
-                id: Uuid::from_bytes([1; 16]).hyphenated().to_string(),
-                blockchain: "icp".to_owned(),
-                address: "def".to_owned(),
-                standard: "native".to_owned(),
-                symbol: "ICP".to_owned(),
-                decimals: 8,
-                name: "Another Account".to_owned(),
-                metadata: vec![],
-            },
-        ],
-    };
+    let icp_asset_id = Uuid::from_bytes([0; 16]).hyphenated().to_string();
+
+    let accounts = vec![
+        MultiAssetAccount {
+            id: Uuid::from_bytes([0; 16]).hyphenated().to_string(),
+            name: "Main Account".to_owned(),
+            metadata: vec![],
+            assets: vec![icp_asset_id.clone()],
+            seed: [0; 16],
+        },
+        MultiAssetAccount {
+            id: Uuid::from_bytes([1; 16]).hyphenated().to_string(),
+            name: "Another Account".to_owned(),
+            metadata: vec![],
+            assets: vec![icp_asset_id.clone()],
+            seed: [1; 16],
+        },
+    ];
+    let assets = vec![Asset {
+        blockchain: "icp".to_owned(),
+        id: Uuid::from_bytes([0; 16]).hyphenated().to_string(),
+        name: "Internet Computer".to_owned(),
+        symbol: "ICP".to_owned(),
+        decimals: 8,
+        metadata: vec![],
+        standards: vec!["icp_native".to_owned()],
+    }];
 
     // non-controller can't set disaster recovery accounts
-    let res: (ApiResult,) = update_candid_as(
+    let err = set_disaster_recovery_accounts_and_assets(
         &env,
         upgrader_id,
         Principal::from_slice(&[1]),
-        "set_disaster_recovery_accounts",
-        (args.clone(),),
+        accounts.clone(),
+        assets.clone(),
     )
-    .expect("Failed update call to set disaster recovery accounts");
-    let err = res
-        .0
-        .expect_err("Non-controller should not be able to set disaster recovery accounts");
+    .expect_err("Non-controller should not be able to set disaster recovery accounts");
     assert!(err.code == "NOT_CONTROLLER");
 
     // controller can set disaster recovery accounts
-    let res: (ApiResult,) = update_candid_as(
+    set_disaster_recovery_accounts_and_assets(
         &env,
         upgrader_id,
         canister_ids.station,
-        "set_disaster_recovery_accounts",
-        (args,),
+        accounts,
+        assets,
     )
-    .expect("Failed update call to set disaster recovery accounts");
-    res.0.expect("Failed to set disaster recovery accounts");
+    .expect("Failed to set disaster recovery accounts");
 
-    let res: (ApiResult<GetDisasterRecoveryAccountsResponse>,) = query_candid_as(
-        &env,
-        upgrader_id,
-        canister_ids.station,
-        "get_disaster_recovery_accounts",
-        ((),),
-    )
-    .expect("Failed query call to get disaster recovery accounts");
-
-    let accounts = res
-        .0
-        .expect("Failed to get disaster recovery accounts")
-        .accounts;
+    let (accounts, _) =
+        get_disaster_recovery_accounts_and_assets(&env, upgrader_id, canister_ids.station);
 
     assert_eq!(accounts.len(), 2);
     assert_eq!(accounts[0].name, "Main Account");
@@ -258,11 +226,12 @@ fn auto_syncs_on_account_creation() {
 
     assert!(state.accounts.is_empty());
 
+    let icp_asset = get_icp_asset(&env, canister_ids.station, WALLET_ADMIN_USER);
+
     // create account for admin user
     let add_account = RequestOperationInput::AddAccount(AddAccountOperationInput {
         name: "admin".to_string(),
-        blockchain: "icp".to_string(),
-        standard: "native".to_string(),
+        assets: vec![icp_asset.id],
         read_permission: AllowDTO {
             auth_scope: station_api::AuthScopeDTO::Restricted,
             user_groups: vec![],
@@ -288,8 +257,8 @@ fn auto_syncs_on_account_creation() {
 
     let state = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
 
-    assert_eq!(state.accounts.len(), 1);
-    assert_eq!(state.accounts[0].name, "admin");
+    assert_eq!(state.multi_asset_accounts.len(), 1);
+    assert_eq!(state.multi_asset_accounts[0].name, "admin");
 }
 
 /*
@@ -355,32 +324,29 @@ fn test_disaster_recovery_flow() {
         .expect("No module hash found");
 
     // install the upgrader wasm for the station as a test
-    let good_request = upgrader_api::RequestDisasterRecoveryInput {
-        module: base_chunk.clone(),
-        module_extra_chunks: Some(module_extra_chunks.clone()),
-        arg: Encode!(&upgrader_api::InitArg {
-            target_canister: canister_ids.station
-        })
-        .unwrap(),
-        install_mode: upgrader_api::InstallMode::Reinstall,
-    };
+    let good_request = upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+        upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+            install_mode: upgrader_api::InstallMode::Reinstall,
+            module: base_chunk.clone(),
+            module_extra_chunks: Some(module_extra_chunks.clone()),
+            arg: Encode!(&upgrader_api::InitArg {
+                target_canister: canister_ids.station
+            })
+            .unwrap(),
+        },
+    );
 
-    let bad_request = upgrader_api::RequestDisasterRecoveryInput {
-        module: base_chunk,
-        module_extra_chunks: Some(module_extra_chunks),
-        arg: vec![1, 2, 3],
-        install_mode: upgrader_api::InstallMode::Reinstall,
-    };
+    let bad_request = upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+        upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+            module: base_chunk,
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: vec![1, 2, 3],
+            install_mode: upgrader_api::InstallMode::Reinstall,
+        },
+    );
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (good_request.clone(),),
-    )
-    .expect("Failed update call to request disaster recovery");
-    res.0.expect("Failed to request disaster recovery");
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, good_request.clone())
+        .expect("Failed to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
     assert!(matches!(
@@ -388,15 +354,8 @@ fn test_disaster_recovery_flow() {
         upgrader_api::RecoveryStatus::Idle
     ));
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        user2_identity,
-        "request_disaster_recovery",
-        (bad_request.clone(),),
-    )
-    .expect("Failed update call to request disaster recovery");
-    res.0.expect("Failed to request disaster recovery");
+    request_disaster_recovery(&env, upgrader_id, user2_identity, bad_request.clone())
+        .expect("Failed to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
     assert!(matches!(
@@ -406,15 +365,7 @@ fn test_disaster_recovery_flow() {
 
     assert!(dr_status.last_recovery_result.is_none());
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        user4_identity,
-        "request_disaster_recovery",
-        (good_request.clone(),),
-    )
-    .expect("Failed update call to request disaster recovery");
-    res.0
+    request_disaster_recovery(&env, upgrader_id, user4_identity, good_request.clone())
         .expect_err("User 4 should not be able to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
@@ -425,15 +376,8 @@ fn test_disaster_recovery_flow() {
 
     assert!(dr_status.last_recovery_result.is_none());
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        user3_identity,
-        "request_disaster_recovery",
-        (good_request.clone(),),
-    )
-    .expect("Failed update call to request disaster recovery");
-    res.0.expect("Failed to request disaster recovery");
+    request_disaster_recovery(&env, upgrader_id, user3_identity, good_request.clone())
+        .expect("Failed to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
     assert!(matches!(
@@ -472,13 +416,14 @@ fn test_disaster_recovery_flow_recreates_same_accounts() {
     let upgrader_id = system_info.upgrader_id;
     let admin_user = get_user(&env, WALLET_ADMIN_USER, canister_ids.station);
 
+    let icp_asset = get_icp_asset(&env, canister_ids.station, WALLET_ADMIN_USER);
+
     // 2. create 3 accounts with the same admin user and no approval required
     let mut initial_accounts = BTreeMap::new();
     for account_nr in 0..3 {
         let create_account_args = AddAccountOperationInput {
             name: format!("account-{}", account_nr),
-            blockchain: "icp".to_string(),
-            standard: "native".to_string(),
+            assets: vec![icp_asset.id.clone()],
             read_permission: AllowDTO {
                 auth_scope: station_api::AuthScopeDTO::Restricted,
                 user_groups: vec![],
@@ -515,65 +460,98 @@ fn test_disaster_recovery_flow_recreates_same_accounts() {
                 .account
                 .expect("Unexpected new account not available");
 
-            initial_accounts.insert(
-                newly_added_account.id,
-                (newly_added_account.name, newly_added_account.address),
-            );
+            initial_accounts.insert(newly_added_account.id.clone(), newly_added_account);
         } else {
             panic!("Unexpected request operation found");
         }
     }
 
+    let init_assets_input = station_api::InitAssetInput {
+        id: Some(icp_asset.id.clone()),
+        name: icp_asset.name.clone(),
+        symbol: icp_asset.symbol.clone(),
+        decimals: icp_asset.decimals,
+        blockchain: icp_asset.blockchain.clone(),
+        standards: icp_asset.standards.clone(),
+        metadata: vec![],
+    };
+
     // 3. perform a reinstall disaster recovery request
     let init_accounts_input = initial_accounts
         .iter()
-        .map(|(id, (name, _))| station_api::InitAccountInput {
-            id: Some(id.to_string()),
-            name: name.to_string(),
-            blockchain: "icp".to_string(),
-            standard: "native".to_string(),
-            metadata: vec![],
-        })
+        .map(
+            |(id, AccountDTO { name, .. })| station_api::InitAccountInput {
+                id: Some(id.clone()),
+                name: name.to_string(),
+                metadata: vec![],
+                assets: vec![icp_asset.id.clone()],
+                seed: Uuid::from_str(id.as_str())
+                    .expect("Failed to parse uuid")
+                    .as_bytes()
+                    .to_owned(),
+            },
+        )
         .collect();
 
     let (base_chunk, module_extra_chunks) =
         upload_canister_chunks_to_asset_canister(&env, station_wasm_module, 500_000);
-    let res: (ApiResult<()>,) = update_candid_as(
+    request_disaster_recovery(
         &env,
         upgrader_id,
         WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (upgrader_api::RequestDisasterRecoveryInput {
-            module: base_chunk,
-            module_extra_chunks: Some(module_extra_chunks),
-            arg: Encode!(&station_api::SystemInstall::Init(station_api::SystemInit {
-                name: "Station".to_string(),
-                admins: vec![
-                    station_api::AdminInitInput {
-                        identity: WALLET_ADMIN_USER,
-                        name: "updated-admin-name".to_string(),
-                    },
-                    station_api::AdminInitInput {
-                        identity: Principal::from_slice(&[95; 29]),
-                        name: "another-admin".to_string(),
-                    },
-                    station_api::AdminInitInput {
-                        identity: Principal::from_slice(&[97; 29]),
-                        name: "yet-another-admin".to_string(),
+        upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+            upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+                module: base_chunk,
+                module_extra_chunks: Some(module_extra_chunks),
+                arg: Encode!(&station_api::SystemInstall::Init(Box::new(
+                    station_api::SystemInit {
+                        name: "Station".to_string(),
+
+                        fallback_controller: None,
+                        upgrader: station_api::SystemUpgraderInput::Id(upgrader_id),
+                        initial_config: station_api::InitialConfig::WithDefaultPolicies {
+                            users: vec![
+                                station_api::InitUserInput {
+                                    identities: vec![UserIdentityInput {
+                                        identity: WALLET_ADMIN_USER,
+                                    }],
+                                    name: "updated-admin-name".to_string(),
+                                    groups: None,
+                                    id: None,
+                                    status: station_api::UserStatusDTO::Active,
+                                },
+                                station_api::InitUserInput {
+                                    identities: vec![UserIdentityInput {
+                                        identity: Principal::from_slice(&[95; 29]),
+                                    }],
+                                    name: "another-admin".to_string(),
+                                    groups: None,
+                                    id: None,
+                                    status: station_api::UserStatusDTO::Active,
+                                },
+                                station_api::InitUserInput {
+                                    identities: vec![UserIdentityInput {
+                                        identity: Principal::from_slice(&[97; 29]),
+                                    }],
+                                    name: "yet-another-admin".to_string(),
+                                    groups: None,
+                                    id: None,
+                                    status: station_api::UserStatusDTO::Active,
+                                },
+                            ],
+                            accounts: init_accounts_input,
+                            assets: vec![init_assets_input],
+                            admin_quorum: 2,
+                            operator_quorum: 1,
+                        },
                     }
-                ],
-                quorum: None,
-                fallback_controller: None,
-                upgrader: station_api::SystemUpgraderInput::Id(upgrader_id),
-                accounts: Some(init_accounts_input),
-            }))
-            .unwrap(),
-            install_mode: upgrader_api::InstallMode::Reinstall,
-        },),
+                )))
+                .unwrap(),
+                install_mode: upgrader_api::InstallMode::Reinstall,
+            },
+        ),
     )
-    .expect("Unexpected failed update call to request disaster recovery");
-    res.0
-        .expect("Unexpected failed to request disaster recovery");
+    .expect("Unexpected failed to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
     assert!(matches!(
@@ -582,7 +560,7 @@ fn test_disaster_recovery_flow_recreates_same_accounts() {
     ));
 
     await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
-    await_station_healthy(&env, canister_ids.station);
+    await_station_healthy(&env, canister_ids.station, WALLET_ADMIN_USER);
 
     // 4. assert that the station is reinstalled with the same accounts and the apporoval policies are set correctly
     let res: (ApiResult<ListAccountsResponse>,) = update_candid_as(
@@ -633,17 +611,26 @@ fn test_disaster_recovery_flow_recreates_same_accounts() {
         }
     }
 
-    assert_eq!(admin_user.groups.len(), 1);
-    let admin_user_group = admin_user.groups.first().expect("No user group found");
+    assert_eq!(admin_user.groups.len(), 2);
+    let admin_user_group = admin_user
+        .groups
+        .iter()
+        .find(|g| g.id == ADMIN_GROUP_ID.hyphenated().to_string())
+        .expect("No user group found");
 
-    for (id, (name, address)) in initial_accounts {
+    for (id, initial_account) in initial_accounts {
         let account = existing_accounts
             .iter()
             .find(|a| a.id == id)
             .expect("Unexpected account not found");
 
-        assert_eq!(account.name, name);
-        assert_eq!(account.address, address);
+        assert_eq!(account.name, initial_account.name);
+
+        for account_address in initial_account.addresses.iter() {
+            assert!(account.addresses.iter().any(|recovered_account_address| {
+                recovered_account_address.address == account_address.address
+            }));
+        }
 
         account.metadata.iter().for_each(|m| {
             assert_eq!(m.key, "key");
@@ -716,32 +703,40 @@ fn test_disaster_recovery_flow_reuses_same_upgrader() {
     // 2. perform the disaster recovery request with the station wasm and using the same upgrader id
     let (base_chunk, module_extra_chunks) =
         upload_canister_chunks_to_asset_canister(&env, station_wasm_module.clone(), 500_000);
-    let res: (ApiResult<()>,) = update_candid_as(
+    request_disaster_recovery(
         &env,
         upgrader_id,
         WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (upgrader_api::RequestDisasterRecoveryInput {
-            module: base_chunk,
-            module_extra_chunks: Some(module_extra_chunks),
-            arg: Encode!(&station_api::SystemInstall::Init(station_api::SystemInit {
-                name: "Station".to_string(),
-                admins: vec![station_api::AdminInitInput {
-                    identity: WALLET_ADMIN_USER,
-                    name: "updated-admin-name".to_string(),
-                }],
-                quorum: None,
-                fallback_controller: Some(fallback_controller),
-                upgrader: station_api::SystemUpgraderInput::Id(upgrader_id),
-                accounts: None,
-            }))
-            .unwrap(),
-            install_mode: upgrader_api::InstallMode::Reinstall,
-        },),
+        upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+            upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+                module: base_chunk,
+                module_extra_chunks: Some(module_extra_chunks),
+                arg: Encode!(&station_api::SystemInstall::Init(Box::new(
+                    station_api::SystemInit {
+                        name: "Station".to_string(),
+                        fallback_controller: Some(fallback_controller),
+                        upgrader: station_api::SystemUpgraderInput::Id(upgrader_id),
+                        initial_config: station_api::InitialConfig::WithAllDefaults {
+                            users: vec![station_api::InitUserInput {
+                                identities: vec![UserIdentityInput {
+                                    identity: WALLET_ADMIN_USER,
+                                }],
+                                name: "updated-admin-name".to_string(),
+                                groups: None,
+                                id: None,
+                                status: station_api::UserStatusDTO::Active,
+                            }],
+                            admin_quorum: 1,
+                            operator_quorum: 1
+                        },
+                    }
+                )))
+                .unwrap(),
+                install_mode: upgrader_api::InstallMode::Reinstall,
+            },
+        ),
     )
-    .expect("Unexpected failed update call to request disaster recovery");
-    res.0
-        .expect("Unexpected failed to request disaster recovery");
+    .expect("Unexpected failed to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
     assert!(matches!(
@@ -805,25 +800,20 @@ fn test_disaster_recovery_in_progress() {
         upload_canister_chunks_to_asset_canister(&env, new_wasm_module, 50_000);
 
     // install the upgrader wasm for the station as a test
-    let good_request = upgrader_api::RequestDisasterRecoveryInput {
-        module: base_chunk,
-        module_extra_chunks: Some(module_extra_chunks),
-        arg: Encode!(&upgrader_api::InitArg {
-            target_canister: canister_ids.station
-        })
-        .unwrap(),
-        install_mode: upgrader_api::InstallMode::Reinstall,
-    };
+    let good_request = upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+        upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+            module: base_chunk,
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Encode!(&upgrader_api::InitArg {
+                target_canister: canister_ids.station
+            })
+            .unwrap(),
+            install_mode: upgrader_api::InstallMode::Reinstall,
+        },
+    );
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (good_request.clone(),),
-    )
-    .expect("Failed update call to request disaster recovery");
-    res.0.expect("Failed to request disaster recovery");
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, good_request.clone())
+        .expect("Failed to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
     assert!(matches!(
@@ -831,15 +821,8 @@ fn test_disaster_recovery_in_progress() {
         upgrader_api::RecoveryStatus::InProgress { .. }
     ));
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (good_request.clone(),),
-    )
-    .expect("Failed update call to request disaster recovery");
-    res.0.expect("Failed to request disaster recovery");
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, good_request.clone())
+        .expect("Failed to request disaster recovery");
 
     let dr_status = get_upgrader_disaster_recovery(&env, &upgrader_id, &canister_ids.station);
     assert!(matches!(
@@ -862,7 +845,7 @@ fn test_disaster_recovery_install() {
     let TestEnv {
         env, canister_ids, ..
     } = setup_new_env_with_config(crate::setup::SetupConfig {
-        start_cycles: Some(2_000_000_000_000),
+        start_cycles: Some(10_000_000_000_000),
         ..Default::default()
     });
 
@@ -898,26 +881,20 @@ fn test_disaster_recovery_install() {
     let new_wasm_module = get_canister_wasm("upgrader");
     let (base_chunk, module_extra_chunks) =
         upload_canister_chunks_to_asset_canister(&env, new_wasm_module, 50_000);
-    let good_request = upgrader_api::RequestDisasterRecoveryInput {
-        module: base_chunk,
-        module_extra_chunks: Some(module_extra_chunks),
-        arg: Encode!(&upgrader_api::InitArg {
-            target_canister: canister_ids.station
-        })
-        .unwrap(),
-        install_mode: upgrader_api::InstallMode::Install,
-    };
+    let good_request = upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+        upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+            module: base_chunk,
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Encode!(&upgrader_api::InitArg {
+                target_canister: canister_ids.station
+            })
+            .unwrap(),
+            install_mode: upgrader_api::InstallMode::Install,
+        },
+    );
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (good_request.clone(),),
-    )
-    .expect("Unexpected failed update call to request disaster recovery");
-    res.0
-        .expect("Unexpected failed to request disaster recovery");
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, good_request.clone())
+        .expect("Failed to request disaster recovery");
 
     await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
 }
@@ -935,22 +912,17 @@ fn test_disaster_recovery_upgrade() {
     let new_wasm_module = get_canister_wasm("station");
     let (base_chunk, module_extra_chunks) =
         upload_canister_chunks_to_asset_canister(&env, new_wasm_module, 500_000);
-    let good_request = upgrader_api::RequestDisasterRecoveryInput {
-        module: base_chunk,
-        module_extra_chunks: Some(module_extra_chunks),
-        arg: Encode!(&station_init_arg).unwrap(),
-        install_mode: upgrader_api::InstallMode::Upgrade,
-    };
+    let good_request = upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+        upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+            module: base_chunk,
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Encode!(&station_init_arg).unwrap(),
+            install_mode: upgrader_api::InstallMode::Upgrade,
+        },
+    );
 
-    let res: (ApiResult<()>,) = update_candid_as(
-        &env,
-        upgrader_id,
-        WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (good_request.clone(),),
-    )
-    .expect("Failed update call to request disaster recovery");
-    res.0.expect("Failed to request disaster recovery");
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, good_request.clone())
+        .expect("Failed to request disaster recovery");
 
     await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
 }
@@ -965,35 +937,344 @@ fn test_disaster_recovery_failing() {
     let upgrader_id = system_info.upgrader_id;
 
     // intentionally bad arg to fail Upgrade
-    let arg = SystemInstall::Init(SystemInit {
+    let arg = SystemInstall::Init(Box::new(SystemInit {
         fallback_controller: None,
-        quorum: None,
-        upgrader: station_api::SystemUpgraderInput::WasmModule(vec![]),
+        upgrader: station_api::SystemUpgraderInput::Deploy(
+            station_api::DeploySystemUpgraderInput {
+                wasm_module: vec![],
+                initial_cycles: None,
+            },
+        ),
         name: "Station".to_string(),
-        admins: vec![],
-        accounts: None,
-    });
+        initial_config: station_api::InitialConfig::WithAllDefaults {
+            users: vec![],
+            admin_quorum: 1,
+            operator_quorum: 1,
+        },
+    }));
 
     // install with intentionally bad arg to fail
     let new_wasm_module = get_canister_wasm("station");
     let (base_chunk, module_extra_chunks) =
         upload_canister_chunks_to_asset_canister(&env, new_wasm_module, 500_000);
-    let good_request = upgrader_api::RequestDisasterRecoveryInput {
-        module: base_chunk,
-        module_extra_chunks: Some(module_extra_chunks),
-        arg: Encode!(&arg).unwrap(),
-        install_mode: upgrader_api::InstallMode::Upgrade,
+    let good_request = upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+        upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+            module: base_chunk,
+            module_extra_chunks: Some(module_extra_chunks),
+            arg: Encode!(&arg).unwrap(),
+            install_mode: upgrader_api::InstallMode::Upgrade,
+        },
+    );
+
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, good_request.clone())
+        .expect("Failed to request disaster recovery");
+
+    await_disaster_recovery_failure(&env, canister_ids.station, upgrader_id);
+}
+
+#[test]
+fn test_disaster_recovery_supports_legacy_format() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    let system_info = get_system_info(&env, WALLET_ADMIN_USER, canister_ids.station);
+    let upgrader_id = system_info.upgrader_id;
+
+    let accounts = vec![
+        Account {
+            id: Uuid::from_bytes([0; 16]).hyphenated().to_string(),
+            name: "Main Account".to_owned(),
+            metadata: vec![],
+            blockchain: "icp".to_owned(),
+            address: "1".to_owned(),
+            standard: "icp_native".to_owned(),
+            symbol: "ICP1".to_owned(),
+            decimals: 8,
+        },
+        Account {
+            id: Uuid::from_bytes([1; 16]).hyphenated().to_string(),
+            name: "Another Account".to_owned(),
+            metadata: vec![],
+            blockchain: "icp".to_owned(),
+            address: "2".to_owned(),
+            standard: "icp_native".to_owned(),
+            symbol: "ICP2".to_owned(),
+            decimals: 8,
+        },
+    ];
+
+    set_disaster_recovery_accounts(&env, upgrader_id, canister_ids.station, accounts)
+        .expect("Failed to set disaster recovery accounts");
+
+    let actual_accounts = get_disaster_recovery_accounts(&env, upgrader_id, canister_ids.station);
+
+    assert!(actual_accounts.len() == 2);
+    assert_eq!(actual_accounts[0].name, "Main Account");
+    assert_eq!(actual_accounts[0].address, "1");
+
+    assert_eq!(actual_accounts[1].name, "Another Account");
+    assert_eq!(actual_accounts[1].address, "2");
+
+    // old response format should deserialize correctly
+    #[derive(Clone, Debug, CandidType, Deserialize)]
+    pub struct GetDisasterRecoveryStateResponse {
+        pub committee: Option<DisasterRecoveryCommittee>,
+        pub accounts: Vec<Account>,
+
+        pub recovery_requests: Vec<StationRecoveryRequest>,
+        pub recovery_status: RecoveryStatus,
+        pub last_recovery_result: Option<RecoveryResult>,
+    }
+
+    let res: (ApiResult<GetDisasterRecoveryStateResponse>,) = query_candid_as(
+        &env,
+        upgrader_id,
+        canister_ids.station,
+        "get_disaster_recovery_state",
+        ((),),
+    )
+    .expect("Failed query call to get disaster recovery accounts");
+
+    let res = res.0.expect("Failed to get disaster recovery accounts");
+
+    assert!(res.accounts.len() == 2);
+}
+
+#[test]
+fn test_disaster_recovery_committee_change_with_open_requests() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    let upgrader_id = get_system_info(&env, WALLET_ADMIN_USER, canister_ids.station).upgrader_id;
+
+    let users: Vec<_> = (0..5)
+        .map(|i: u64| AdminUser {
+            id: Uuid::from_u128(i.into()).hyphenated().to_string(),
+            name: format!("user_{}", i),
+            identities: vec![Principal::from_slice(&i.to_le_bytes())],
+        })
+        .collect();
+    let request = upgrader_api::RequestDisasterRecoveryInput::InstallCode(
+        upgrader_api::RequestDisasterRecoveryInstallCodeInput {
+            module: vec![],
+            module_extra_chunks: None,
+            arg: vec![],
+            install_mode: upgrader_api::InstallMode::Reinstall,
+        },
+    );
+    let disaster_recovery = |i: usize| {
+        request_disaster_recovery(
+            &env,
+            upgrader_id,
+            *users[i].identities.first().unwrap(),
+            request.clone(),
+        )
+        .unwrap();
     };
 
-    let res: (ApiResult<()>,) = update_candid_as(
+    // set committee to be {u0, u1, u2, u3}, quorum=3
+    let quorum = 3;
+    let committee = DisasterRecoveryCommittee {
+        quorum,
+        users: users[..=3].to_vec(),
+    };
+    set_disaster_recovery_committee(&env, upgrader_id, canister_ids.station, committee.clone())
+        .unwrap();
+
+    // users u0, u1 make disaster recovery request
+    disaster_recovery(0);
+    disaster_recovery(1);
+
+    // user u0 leaves the committee: set committee to be {u1, u2, u3}, quorum=3
+    let quorum = 3;
+    let committee = DisasterRecoveryCommittee {
+        quorum,
+        users: users[1..=3].to_vec(),
+    };
+    set_disaster_recovery_committee(&env, upgrader_id, canister_ids.station, committee.clone())
+        .unwrap();
+
+    // user u2 makes disaster recovery request
+    disaster_recovery(2);
+
+    // disaster recovery should not be triggered as only users u1, u2 (less than quorum=3)
+    // from the current committee submitted disaster recovery requests,
+    // but the requests from the current committee should be retained
+    let some_committee_member = *users[3].identities.first().unwrap();
+    let state = get_disaster_recovery_state(&env, upgrader_id, some_committee_member);
+    assert_eq!(state.recovery_requests.len(), 2);
+    state
+        .recovery_requests
+        .iter()
+        .all(|request| request.user_id == users[1].id || request.user_id == users[2].id);
+    assert_eq!(state.recovery_status, upgrader_api::RecoveryStatus::Idle);
+    assert!(state.last_recovery_result.is_none());
+}
+
+// Test disaster recovery via canister snapshots
+#[test]
+fn test_disaster_recovery_via_canister_snapshots() {
+    let TestEnv {
+        env, canister_ids, ..
+    } = setup_new_env();
+
+    let system_info = get_system_info(&env, WALLET_ADMIN_USER, canister_ids.station);
+    let upgrader_id = system_info.upgrader_id;
+
+    // retrieve the existing snapshots from the management canister: there should be no snapshots yet
+    let snapshots: Vec<_> = env
+        .list_canister_snapshots(canister_ids.station, Some(NNS_ROOT_CANISTER_ID))
+        .unwrap();
+    assert!(snapshots.is_empty());
+
+    // take a snapshot of the station via upgrader
+    let snapshot_request = upgrader_api::RequestDisasterRecoveryInput::Snapshot(
+        upgrader_api::RequestDisasterRecoverySnapshotInput {
+            replace_snapshot: None,
+            force: false,
+        },
+    );
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, snapshot_request)
+        .expect("Failed to request disaster recovery");
+    await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
+
+    // retrieve the existing snapshots from the management canister:
+    // there should be a single snapshot now
+    let snapshots = env
+        .list_canister_snapshots(canister_ids.station, Some(NNS_ROOT_CANISTER_ID))
+        .unwrap();
+    assert_eq!(snapshots.len(), 1);
+
+    // retrieve the existing snapshots via the upgrader
+    let snapshots_via_upgrader = update_candid_as::<_, (ApiResult<Vec<upgrader_api::Snapshot>>,)>(
         &env,
         upgrader_id,
         WALLET_ADMIN_USER,
-        "request_disaster_recovery",
-        (good_request.clone(),),
+        "canister_snapshots",
+        (),
     )
-    .expect("Failed update call to request disaster recovery");
-    res.0.expect("Failed to request disaster recovery");
+    .unwrap()
+    .0
+    .unwrap();
+    assert_eq!(snapshots_via_upgrader.len(), snapshots.len());
+    for i in 0..snapshots_via_upgrader.len() {
+        assert_eq!(
+            snapshots_via_upgrader[i].snapshot_id,
+            hex::encode(&snapshots[i].id)
+        );
+        assert_eq!(
+            snapshots_via_upgrader[i].taken_at_timestamp,
+            timestamp_to_rfc3339(&snapshots[i].taken_at_timestamp)
+        );
+        assert_eq!(
+            snapshots_via_upgrader[i].total_size,
+            snapshots[i].total_size
+        );
+    }
 
-    await_disaster_recovery_failure(&env, canister_ids.station, upgrader_id);
+    // try to retrieve the existing snapshots via the upgrader as non-committee member
+    let user_id = user_test_id(0);
+    let err = update_candid_as::<_, (ApiResult<Vec<upgrader_api::Snapshot>>,)>(
+        &env,
+        upgrader_id,
+        user_id,
+        "canister_snapshots",
+        (),
+    )
+    .unwrap()
+    .0
+    .unwrap_err();
+    assert_eq!(err.code, "UNAUTHORIZED".to_string());
+
+    // rename the admin user so that we can see if restoring the station from a snapshot
+    // has an effect
+    let admin_user = get_user(&env, WALLET_ADMIN_USER, canister_ids.station);
+    let edit_user = RequestOperationInput::EditUser(EditUserOperationInput {
+        id: admin_user.id.clone(),
+        name: Some("Changed admin name".to_string()),
+        identities: None,
+        groups: None,
+        status: None,
+        cancel_pending_requests: None,
+    });
+    execute_request(&env, WALLET_ADMIN_USER, canister_ids.station, edit_user).unwrap();
+    let new_admin_user = get_user(&env, WALLET_ADMIN_USER, canister_ids.station);
+    assert_ne!(admin_user.name, new_admin_user.name);
+
+    // uninstall the station
+    let prune_request = upgrader_api::RequestDisasterRecoveryInput::Prune(
+        upgrader_api::RequestDisasterRecoveryPruneInput::State,
+    );
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, prune_request)
+        .expect("Failed to request disaster recovery");
+    await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
+    let status = canister_status(&env, Some(NNS_ROOT_CANISTER_ID), canister_ids.station);
+    assert_eq!(status.module_hash, None);
+
+    // restore the station from its snapshot
+    let restore_request = upgrader_api::RequestDisasterRecoveryInput::Restore(
+        upgrader_api::RequestDisasterRecoveryRestoreInput {
+            snapshot_id: hex::encode(&snapshots[0].id),
+        },
+    );
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, restore_request)
+        .expect("Failed to request disaster recovery");
+    await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
+    let status = canister_status(&env, Some(NNS_ROOT_CANISTER_ID), canister_ids.station);
+    status.module_hash.unwrap();
+
+    // check the name of the admin user after restoring a snapshot
+    let restored_admin_user = get_user(&env, WALLET_ADMIN_USER, canister_ids.station);
+    assert_eq!(admin_user.name, restored_admin_user.name);
+
+    // retrieve the existing snapshots from the management canister:
+    // there should still be a single snapshot now
+    let snapshots = env
+        .list_canister_snapshots(canister_ids.station, Some(NNS_ROOT_CANISTER_ID))
+        .unwrap();
+    assert_eq!(snapshots.len(), 1);
+
+    // prune the snapshot
+    let prune_request = upgrader_api::RequestDisasterRecoveryInput::Prune(
+        upgrader_api::RequestDisasterRecoveryPruneInput::Snapshot(hex::encode(&snapshots[0].id)),
+    );
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, prune_request)
+        .expect("Failed to request disaster recovery");
+    await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
+    let snapshots = env
+        .list_canister_snapshots(canister_ids.station, Some(NNS_ROOT_CANISTER_ID))
+        .unwrap();
+    assert!(snapshots.is_empty());
+
+    // prune the chunk store
+    let chunks = env
+        .stored_chunks(canister_ids.station, Some(NNS_ROOT_CANISTER_ID))
+        .unwrap();
+    assert!(!chunks.is_empty());
+    let prune_request = upgrader_api::RequestDisasterRecoveryInput::Prune(
+        upgrader_api::RequestDisasterRecoveryPruneInput::ChunkStore,
+    );
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, prune_request)
+        .expect("Failed to request disaster recovery");
+    await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
+    let chunks = env
+        .stored_chunks(canister_ids.station, Some(NNS_ROOT_CANISTER_ID))
+        .unwrap();
+    assert!(chunks.is_empty());
+
+    // restart the station via disaster recovery
+    // we stop the station by a mocked call from the NNS root canister
+    env.stop_canister(canister_ids.station, Some(NNS_ROOT_CANISTER_ID))
+        .unwrap();
+    let status = canister_status(&env, Some(NNS_ROOT_CANISTER_ID), canister_ids.station);
+    assert!(matches!(status.status, CanisterStatusType::Stopped));
+    // now we restart the station via disaster recovery
+    let start_request = upgrader_api::RequestDisasterRecoveryInput::Start;
+    request_disaster_recovery(&env, upgrader_id, WALLET_ADMIN_USER, start_request)
+        .expect("Failed to request disaster recovery");
+    await_disaster_recovery_success(&env, canister_ids.station, upgrader_id);
+    let status = canister_status(&env, Some(NNS_ROOT_CANISTER_ID), canister_ids.station);
+    assert!(matches!(status.status, CanisterStatusType::Running));
 }

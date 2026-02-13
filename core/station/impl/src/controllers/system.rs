@@ -6,7 +6,7 @@ use crate::{
     errors::AuthorizationError,
     migration,
     models::resource::{Resource, SystemResourceAction},
-    services::{SystemService, SYSTEM_SERVICE},
+    services::{SystemService, CYCLE_MANAGER, INITIALIZING, SYSTEM_SERVICE},
     SYSTEM_VERSION,
 };
 use ic_cdk_macros::{post_upgrade, query, update};
@@ -27,9 +27,13 @@ fn set_certified_data_for_skip_certification() {
 #[cfg(any(not(feature = "canbench"), test))]
 #[ic_cdk_macros::init]
 async fn initialize(input: Option<SystemInstall>) {
+    INITIALIZING.with_borrow_mut(|initializing| {
+        *initializing = true;
+    });
+
     set_certified_data_for_skip_certification();
     match input {
-        Some(SystemInstall::Init(input)) => CONTROLLER.initialize(input).await,
+        Some(SystemInstall::Init(input)) => CONTROLLER.initialize(*input).await,
         Some(SystemInstall::Upgrade(_)) | None => trap("Invalid args to initialize canister"),
     }
 }
@@ -57,10 +61,14 @@ pub async fn mock_init() {
 
 #[post_upgrade]
 async fn post_upgrade(input: Option<SystemInstall>) {
+    INITIALIZING.with_borrow_mut(|initializing| {
+        *initializing = true;
+    });
+
     // Runs the migrations for the canister to ensure the stable memory schema is up-to-date
     //
     // WARNING: This needs to be done before any other access to stable memory is done, this is because
-    // it might clear memory ids and the current codebase might be reusing them and loading a diffirent
+    // it might clear memory ids and the current codebase might be reusing them and loading a different
     // datatype from the one that was initially stored.
     migration::MigrationHandler::run();
 
@@ -129,9 +137,19 @@ impl SystemController {
     async fn system_info(&self) -> ApiResult<SystemInfoResponse> {
         let system_info = self.system_service.get_system_info();
         let cycles = canister_balance();
+        let upgrader_balance = CYCLE_MANAGER.get_canister(system_info.get_upgrader_canister_id());
 
         Ok(SystemInfoResponse {
-            system: system_info.to_dto(&cycles, SYSTEM_VERSION),
+            system: system_info.to_dto(
+                &cycles,
+                SYSTEM_VERSION,
+                upgrader_balance.and_then(|record| {
+                    record
+                        .get_cycles()
+                        .as_ref()
+                        .map(|cycles_balance| cycles_balance.amount as u64)
+                }),
+            ),
         })
     }
 
@@ -168,9 +186,11 @@ mod tests {
 
     #[tokio::test]
     async fn apply_migration_should_migrate_stable_memory_version() {
+        let base_stable_memory_version = STABLE_MEMORY_VERSION - 1;
+
         let mut system_info = SystemInfo::new(Principal::management_canister(), Vec::new());
 
-        system_info.set_stable_memory_version(0);
+        system_info.set_stable_memory_version(base_stable_memory_version);
 
         write_system_info(system_info);
 
@@ -191,7 +211,7 @@ mod tests {
 
         REQUEST_REPOSITORY.insert(request.to_key(), request.clone());
 
-        system_info.set_stable_memory_version(0);
+        system_info.set_stable_memory_version(base_stable_memory_version);
         system_info.set_change_canister_request(request.id);
 
         write_system_info(system_info);

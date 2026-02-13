@@ -1,4 +1,4 @@
-use super::Blockchain;
+use super::{AddressFormat, Blockchain};
 use crate::errors::AddressBookError;
 use crate::models::Metadata;
 use candid::{CandidType, Deserialize};
@@ -25,6 +25,8 @@ pub struct AddressBookEntry {
     pub address: String,
     /// The blockchain type (e.g. `icp`, `eth`, `btc`)
     pub blockchain: Blockchain,
+    /// The address' format.
+    pub address_format: AddressFormat,
     /// The address' metadata.
     pub metadata: Metadata,
     /// The labels associated with the address.
@@ -135,12 +137,14 @@ impl AddressBookEntry {
     }
 }
 
-#[derive(CandidType, Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ListAddressBookEntriesInput {
     pub ids: Option<Vec<UUID>>,
     pub addresses: Option<Vec<String>>,
     pub blockchain: Option<Blockchain>,
     pub labels: Option<Vec<String>>,
+    pub address_formats: Option<Vec<AddressFormat>>,
+    pub search_term: Option<String>,
 }
 
 #[derive(CandidType, Deserialize, Debug, Clone)]
@@ -265,6 +269,7 @@ pub mod address_book_entry_test_utils {
             id: *Uuid::new_v4().as_bytes(),
             address_owner: "foo".to_string(),
             address: "0x1234".to_string(),
+            address_format: AddressFormat::ICPAccountIdentifier,
             labels: Vec::new(),
             blockchain: Blockchain::InternetComputer,
             metadata: Metadata::mock(),
@@ -274,7 +279,7 @@ pub mod address_book_entry_test_utils {
 
     pub fn add_address_book_entry(id: &UUID) -> AddressBookEntry {
         let mut address_book_entry = mock_address_book_entry();
-        address_book_entry.id = id.to_owned();
+        id.clone_into(&mut address_book_entry.id);
         ADDRESS_BOOK_REPOSITORY.insert(address_book_entry.to_key(), address_book_entry.to_owned());
 
         address_book_entry
